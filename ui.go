@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -35,48 +34,6 @@ const (
 	modeNormal   = "normal"
 	modeComplete = "complete"
 )
-
-// Key bindings
-type keyMap struct {
-	Up      key.Binding
-	Down    key.Binding
-	Enter   key.Binding
-	Esc     key.Binding
-	Confirm key.Binding
-	Cancel  key.Binding
-	Help    key.Binding
-	Filter1 key.Binding
-	Filter2 key.Binding
-	Filter3 key.Binding
-	Filter4 key.Binding
-	Filter5 key.Binding
-}
-
-func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Help}
-}
-
-func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{k.Up, k.Down, k.Enter, k.Esc},
-		{k.Help, k.Filter1, k.Filter2, k.Filter3, k.Filter4, k.Filter5},
-	}
-}
-
-var keys = keyMap{
-	Up:      key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
-	Down:    key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
-	Enter:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
-	Esc:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back/quit")),
-	Confirm: key.NewBinding(key.WithKeys("y", "s"), key.WithHelp("y/s", "confirm")),
-	Cancel:  key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "cancel")),
-	Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("help", "?")),
-	Filter1: key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "All")),
-	Filter2: key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "APT")),
-	Filter3: key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "Flatpak")),
-	Filter4: key.NewBinding(key.WithKeys("4"), key.WithHelp("4", "Snap")),
-	Filter5: key.NewBinding(key.WithKeys("5"), key.WithHelp("5", "AppImage")),
-}
 
 // Messages
 type scanDoneMsg struct{ result ScanResult }

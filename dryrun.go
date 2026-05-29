@@ -55,11 +55,12 @@ func dryRunAPT(pkg PackageResult, mode string) DryRunResult {
 		result.Commands = append(result.Commands, "sudo apt remove -y "+pkg.Name)
 	}
 	if mode == modeComplete {
-		home, _ := os.UserHomeDir()
-		result.DirsToRemove = append(result.DirsToRemove,
-			filepath.Join(home, ".config", strings.ToLower(pkg.Name)),
-			filepath.Join(home, ".local", "share", strings.ToLower(pkg.Name)),
-		)
+		if home, err := os.UserHomeDir(); err == nil {
+			result.DirsToRemove = append(result.DirsToRemove,
+				filepath.Join(home, ".config", strings.ToLower(pkg.Name)),
+				filepath.Join(home, ".local", "share", strings.ToLower(pkg.Name)),
+			)
+		}
 	}
 	return result
 }
@@ -76,10 +77,11 @@ func dryRunFlatpak(pkg PackageResult, mode string) DryRunResult {
 		result.Commands = append(result.Commands, "flatpak uninstall -y "+target)
 	}
 	if mode == modeComplete && pkg.ID != "" {
-		home, _ := os.UserHomeDir()
-		result.DirsToRemove = append(result.DirsToRemove,
-			filepath.Join(home, ".var", "app", pkg.ID),
-		)
+		if home, err := os.UserHomeDir(); err == nil {
+			result.DirsToRemove = append(result.DirsToRemove,
+				filepath.Join(home, ".var", "app", pkg.ID),
+			)
+		}
 	}
 	return result
 }
@@ -88,10 +90,11 @@ func dryRunSnap(pkg PackageResult, mode string) DryRunResult {
 	result := DryRunResult{}
 	result.Commands = append(result.Commands, "sudo snap remove "+pkg.Name)
 	if mode == modeComplete {
-		home, _ := os.UserHomeDir()
-		result.DirsToRemove = append(result.DirsToRemove,
-			filepath.Join(home, "snap", pkg.Name),
-		)
+		if home, err := os.UserHomeDir(); err == nil {
+			result.DirsToRemove = append(result.DirsToRemove,
+				filepath.Join(home, "snap", pkg.Name),
+			)
+		}
 	}
 	return result
 }
@@ -100,11 +103,12 @@ func dryRunAppImage(pkg PackageResult, mode string) DryRunResult {
 	result := DryRunResult{}
 	result.Commands = append(result.Commands, "rm "+pkg.Path)
 	if mode == modeComplete {
-		home, _ := os.UserHomeDir()
-		result.DirsToRemove = append(result.DirsToRemove,
-			filepath.Join(home, ".config", strings.ToLower(pkg.Name)),
-			filepath.Join(home, ".local", "share", strings.ToLower(pkg.Name)),
-		)
+		if home, err := os.UserHomeDir(); err == nil {
+			result.DirsToRemove = append(result.DirsToRemove,
+				filepath.Join(home, ".config", strings.ToLower(pkg.Name)),
+				filepath.Join(home, ".local", "share", strings.ToLower(pkg.Name)),
+			)
+		}
 	}
 	return result
 }
@@ -117,8 +121,9 @@ func estimatePackageSpace(pkg PackageResult) int64 {
 	case SourceAPT:
 		out, err := exec.CommandContext(ctx, "dpkg-query", "-W", "-f=${Installed-Size}", pkg.Name).Output()
 		if err == nil {
-			size, _ := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
-			return size * 1024
+			if size, pErr := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64); pErr == nil {
+				return size * 1024
+			}
 		}
 	case SourceFlatpak:
 		_, err := exec.CommandContext(ctx, "flatpak", "info", "--show-ref", pkg.ID).Output()
@@ -133,8 +138,9 @@ func estimatePackageSpace(pkg PackageResult) int64 {
 				if err2 == nil && len(out2) > 0 {
 					parts := strings.Fields(string(out2))
 					if len(parts) > 0 {
-						size, _ := strconv.ParseInt(parts[0], 10, 64)
-						return size
+						if size, pErr := strconv.ParseInt(parts[0], 10, 64); pErr == nil {
+							return size
+						}
 					}
 				}
 			}
@@ -148,12 +154,14 @@ func estimatePackageSpace(pkg PackageResult) int64 {
 					if len(parts) >= 2 {
 						sizeStr := parts[1]
 						if strings.HasSuffix(sizeStr, "MB") {
-							num, _ := strconv.ParseFloat(strings.TrimSuffix(sizeStr, "MB"), 64)
-							return int64(num * 1024 * 1024)
+							if num, pErr := strconv.ParseFloat(strings.TrimSuffix(sizeStr, "MB"), 64); pErr == nil {
+								return int64(num * 1024 * 1024)
+							}
 						}
 						if strings.HasSuffix(sizeStr, "GB") {
-							num, _ := strconv.ParseFloat(strings.TrimSuffix(sizeStr, "GB"), 64)
-							return int64(num * 1024 * 1024 * 1024)
+							if num, pErr := strconv.ParseFloat(strings.TrimSuffix(sizeStr, "GB"), 64); pErr == nil {
+								return int64(num * 1024 * 1024 * 1024)
+							}
 						}
 					}
 				}

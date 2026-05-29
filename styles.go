@@ -3,11 +3,6 @@ package main
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#FF6B6B")).
-			MarginBottom(1)
-
 	subtitleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#A8DADC")).
 			Italic(true)
