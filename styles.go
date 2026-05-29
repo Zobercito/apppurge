@@ -34,6 +34,10 @@ var (
 	dimStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6C757D"))
 
+	highlightStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#FFD166"))
+
 	sourceAPT = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#4ECDC4")).
 			Bold(true)
@@ -48,5 +52,9 @@ var (
 
 	sourceAppImage = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#EC4899")).
+			Bold(true)
+
+	sourceAll = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
 			Bold(true)
 )
