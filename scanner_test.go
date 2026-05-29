@@ -127,6 +127,68 @@ func TestIsProtected(t *testing.T) {
 	}
 }
 
+func TestTextMatches(t *testing.T) {
+	tests := []struct {
+		text     string
+		term     string
+		expected bool
+	}{
+		// Direct substring match
+		{"firefox", "firefox", true},
+		{"firefox", "fox", true},
+		{"firefox", "xyz", false},
+		// Case insensitive
+		{"Firefox", "firefox", true},
+		{"firefox", "FIREFOX", true},
+		// Alias match (whole word only)
+		{"code", "vscode", true},
+		{"code", "vscodium", false}, // different alias
+		{"Visual Studio Code\tcom.visualstudio.code", "vscode", true},
+		{"google-chrome-stable", "chrome", true},
+		{"Firefox", "ff", true},
+		{"thunderbird", "tb", true},
+		// Alias must NOT match as substring
+		{"amd64-microcode", "vscode", false},
+		{"chromium-codecs-ffmpeg-extra", "vscode", false},
+		{"libavcodec58", "vscode", false},
+		{"qrencode", "vscode", false},
+		// No alias match
+		{"firefox", "chrome", false},
+		{"vlc", "vscode", false},
+	}
+
+	for _, tt := range tests {
+		got := textMatches(tt.text, tt.term)
+		if got != tt.expected {
+			t.Errorf("textMatches(%q, %q) = %v, want %v", tt.text, tt.term, got, tt.expected)
+		}
+	}
+}
+
+func TestSearchAliases(t *testing.T) {
+	// Verify common aliases resolve to real package names
+	checks := []struct {
+		alias string
+		want  string
+	}{
+		{"vscode", "code"},
+		{"vscodium", "codium"},
+		{"chrome", "google-chrome"},
+		{"ff", "firefox"},
+		{"tb", "thunderbird"},
+	}
+	for _, c := range checks {
+		got, ok := searchAliases[c.alias]
+		if !ok {
+			t.Errorf("alias %q not found in searchAliases", c.alias)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("searchAliases[%q] = %q, want %q", c.alias, got, c.want)
+		}
+	}
+}
+
 func TestScanAll(t *testing.T) {
 	if _, err := exec.LookPath("dpkg-query"); err != nil {
 		t.Skip("dpkg-query not available")

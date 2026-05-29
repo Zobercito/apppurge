@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -118,6 +119,44 @@ func isProtected(pkg PackageResult) bool {
 	return false
 }
 
+// searchAliases maps common abbreviations or alternative names to the actual
+// package name. This allows users to find packages by well-known short names.
+var searchAliases = map[string]string{
+	"vscode":   "code",
+	"vscodium": "codium",
+	"chrome":   "google-chrome",
+	"ff":       "firefox",
+	"tb":       "thunderbird",
+}
+
+// aliasREs holds word-boundary regexps for each alias, pre-compiled at init.
+// When an alias is used, the canonical name must appear as a whole word
+// (not as a substring), avoiding false positives like "microcode" for "code".
+var aliasREs map[string]*regexp.Regexp
+
+func init() {
+	aliasREs = make(map[string]*regexp.Regexp, len(searchAliases))
+	for alias, canonical := range searchAliases {
+		aliasREs[alias] = regexp.MustCompile(`\b` + regexp.QuoteMeta(canonical) + `\b`)
+	}
+}
+
+// textMatches checks whether text contains the search term. It tries a direct
+// substring match first, then falls back to known aliases using word-boundary
+// matching so that e.g. searching "vscode" finds the package "code" but not
+// "amd64-microcode".
+func textMatches(text, term string) bool {
+	lowerText := strings.ToLower(text)
+	t := strings.ToLower(term)
+	if strings.Contains(lowerText, t) {
+		return true
+	}
+	if re, ok := aliasREs[t]; ok {
+		return re.MatchString(lowerText)
+	}
+	return false
+}
+
 func scanAPT(ctx context.Context, term string) ([]PackageResult, error) {
 	if _, err := exec.LookPath("dpkg-query"); err != nil {
 		return nil, nil
@@ -128,7 +167,6 @@ func scanAPT(ctx context.Context, term string) ([]PackageResult, error) {
 		return nil, err
 	}
 	var results []PackageResult
-	lower := strings.ToLower(term)
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -138,7 +176,7 @@ func scanAPT(ctx context.Context, term string) ([]PackageResult, error) {
 		if idx := strings.Index(name, ":"); idx != -1 {
 			name = name[:idx]
 		}
-		if strings.Contains(strings.ToLower(name), lower) {
+		if textMatches(name, term) {
 			pkg := PackageResult{Name: name, Source: SourceAPT}
 			if isProtected(pkg) {
 				continue
@@ -159,7 +197,6 @@ func scanFlatpak(ctx context.Context, term string) ([]PackageResult, error) {
 		return nil, err
 	}
 	var results []PackageResult
-	lower := strings.ToLower(term)
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -171,7 +208,7 @@ func scanFlatpak(ctx context.Context, term string) ([]PackageResult, error) {
 		if len(parts) > 1 {
 			id = strings.TrimSpace(parts[1])
 		}
-		if strings.Contains(strings.ToLower(line), lower) {
+		if textMatches(line, term) {
 			results = append(results, PackageResult{Name: name, Source: SourceFlatpak, ID: id})
 		}
 	}
@@ -188,7 +225,6 @@ func scanSnap(ctx context.Context, term string) ([]PackageResult, error) {
 		return nil, err
 	}
 	var results []PackageResult
-	lower := strings.ToLower(term)
 	lines := strings.Split(string(out), "\n")
 	for i, line := range lines {
 		if i == 0 {
@@ -203,7 +239,7 @@ func scanSnap(ctx context.Context, term string) ([]PackageResult, error) {
 		if isProtected(pkg) {
 			continue
 		}
-		if strings.Contains(strings.ToLower(name), lower) {
+		if textMatches(name, term) {
 			results = append(results, pkg)
 		}
 	}
@@ -224,7 +260,6 @@ func scanAppImage(ctx context.Context, term string) ([]PackageResult, error) {
 	}
 
 	var results []PackageResult
-	lower := strings.ToLower(term)
 
 	for _, dir := range searchDirs {
 		if ctx.Err() != nil {
@@ -242,7 +277,7 @@ func scanAppImage(ctx context.Context, term string) ([]PackageResult, error) {
 			if !strings.HasSuffix(strings.ToLower(name), ".appimage") {
 				continue
 			}
-			if strings.Contains(strings.ToLower(name), lower) {
+			if textMatches(name, term) {
 				cleanName := strings.TrimSuffix(strings.ToLower(name), ".appimage")
 				if len(cleanName) > 0 {
 					cleanName = name[:len(cleanName)]
