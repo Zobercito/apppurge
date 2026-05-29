@@ -67,10 +67,20 @@ func getAPTInfo(pkg PackageResult) PackageInfo {
 	if err == nil {
 		lines := strings.Split(string(out), "\n")
 		for _, line := range lines[1:] {
+			raw := line
 			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "|") {
-				info.Dependents = append(info.Dependents, strings.TrimPrefix(line, "  "))
+			if line == "" {
+				continue
 			}
+			// Skip tree-drawing continuation lines
+			if strings.HasPrefix(line, "|") {
+				continue
+			}
+			// Skip header lines (e.g. "Reverse Depends:") — real deps are indented
+			if len(raw) > 0 && raw[0] != ' ' && raw[0] != '\t' {
+				continue
+			}
+			info.Dependents = append(info.Dependents, strings.TrimPrefix(line, "  "))
 		}
 	}
 
