@@ -21,6 +21,7 @@ const (
 	stateResults
 	stateModeSelect
 	stateConfirm
+	statePassword
 	stateSudoAuth
 	stateExecuting
 	stateDone
@@ -89,26 +90,27 @@ type dryRunMsg struct {
 
 // Model is the main Bubble Tea model.
 type Model struct {
-	state      int
-	textInput  textinput.Model
-	spinner    spinner.Model
-	viewport   viewport.Model
-	help       help.Model
-	searchTerm string
-	results    []PackageResult
-	allResults []PackageResult
-	cursor     int
-	selected   PackageResult
-	modeCursor int
-	mode       string
-	err        error
-	quitting   bool
-	scanErrors []ScanError
-	filter     string
-	width      int
-	height     int
-	pkgInfo    *PackageInfo
-	dryResult  *DryRunResult
+	state         int
+	textInput     textinput.Model
+	spinner       spinner.Model
+	viewport      viewport.Model
+	help          help.Model
+	searchTerm    string
+	results       []PackageResult
+	allResults    []PackageResult
+	cursor        int
+	selected      PackageResult
+	modeCursor    int
+	mode          string
+	err           error
+	quitting      bool
+	scanErrors    []ScanError
+	filter        string
+	width         int
+	height        int
+	pkgInfo       *PackageInfo
+	dryResult     *DryRunResult
+	passwordInput textinput.Model
 }
 
 // InitModel creates a new model, optionally with a pre-filled search term.
@@ -121,18 +123,25 @@ func InitModel(term string) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
+	pi := textinput.New()
+	pi.Placeholder = "sudo password"
+	pi.EchoMode = textinput.EchoPassword
+	pi.Width = 60
+	pi.Focus()
+
 	state := stateInput
 	if term != "" {
 		state = stateScanning
 	}
 
 	return Model{
-		state:      state,
-		textInput:  ti,
-		spinner:    sp,
-		searchTerm: term,
-		help:       help.New(),
-		viewport:   viewport.New(80, 20),
+		state:         state,
+		textInput:     ti,
+		spinner:       sp,
+		searchTerm:    term,
+		help:          help.New(),
+		viewport:      viewport.New(80, 20),
+		passwordInput: pi,
 	}
 }
 
@@ -184,12 +193,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case sudoAuthDoneMsg:
 		if msg.err != nil {
-			m.err = fmt.Errorf("authentication error: %w", msg.err)
-			m.state = stateDone
-			return m, nil
+			m.err = fmt.Errorf("incorrect password: %w", msg.err)
+			m.state = statePassword
+			m.passwordInput.SetValue("")
+			m.passwordInput.Focus()
+			return m, tea.ClearScreen
 		}
 		m.state = stateExecuting
-		return m, tea.Batch(m.spinner.Tick, doUninstall(m.selected, m.mode))
+		return m, tea.Batch(tea.ClearScreen, m.spinner.Tick, doUninstall(m.selected, m.mode))
 	case pkgInfoMsg:
 		m.pkgInfo = &msg.info
 		return m, nil
@@ -214,6 +225,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateModeSelect(msg)
 	case stateConfirm:
 		return m.updateConfirm(msg)
+	case statePassword:
+		return m.updatePassword(msg)
 	case stateHelp:
 		return m.updateHelp(msg)
 	case statePackageInfo:
@@ -364,13 +377,42 @@ func (m Model) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch strings.ToLower(key.String()) {
 		case "s", "y":
-			m.state = stateSudoAuth
-			return m, tea.Batch(m.spinner.Tick, doSudoAuth())
+			if m.selected.Source == SourceAPT || m.selected.Source == SourceSnap {
+				m.state = statePassword
+				m.err = nil
+				m.passwordInput.SetValue("")
+				m.passwordInput.Focus()
+				return m, tea.ClearScreen
+			}
+			m.state = stateExecuting
+			return m, tea.Batch(tea.ClearScreen, m.spinner.Tick, doUninstall(m.selected, m.mode))
 		case "n", "esc":
 			m.state = stateModeSelect
 		}
 	}
 	return m, nil
+}
+
+func (m Model) updatePassword(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.String() {
+		case "enter":
+			password := m.passwordInput.Value()
+			if password == "" {
+				return m, nil
+			}
+			m.passwordInput.SetValue("")
+			m.state = stateSudoAuth
+			return m, tea.Batch(tea.ClearScreen, m.spinner.Tick, doSudoPassword(password))
+		case "esc":
+			m.state = stateModeSelect
+			m.passwordInput.SetValue("")
+			m.err = nil
+		}
+	}
+	var cmd tea.Cmd
+	m.passwordInput, cmd = m.passwordInput.Update(msg)
+	return m, cmd
 }
 
 func (m Model) updateHelp(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -448,6 +490,8 @@ func (m Model) View() string {
 		return m.viewModeSelect() + separator
 	case stateConfirm:
 		return m.viewConfirm() + separator
+	case statePassword:
+		return m.viewPassword() + separator
 	case stateSudoAuth:
 		return m.viewSudoAuth() + separator
 	case stateExecuting:
@@ -522,7 +566,7 @@ func (m Model) viewModeSelect() string {
 
 	options := []string{
 		"Normal Uninstall (keep your settings)",
-		"Complete Uninstall (delete everything, no trace left)",
+		"Complete Uninstall (delete everything)",
 		"Back to results",
 	}
 	for i, opt := range options {
@@ -541,11 +585,11 @@ func (m Model) viewModeSelect() string {
 }
 
 func (m Model) viewConfirm() string {
-	modeText := "normal"
+	modeText := "Normal Uninstall"
 	if m.mode == modeComplete {
-		modeText = "complete (purge)"
+		modeText = "Complete Uninstall"
 	}
-	alert := fmt.Sprintf("Are you sure you want to uninstall \"%s\" [%s] in %s mode?",
+	alert := fmt.Sprintf("Uninstall \"%s\" [%s]\nMode: %s\n\nAre you sure?",
 		m.selected.Name, m.selected.Source, modeText)
 	return fmt.Sprintf("%s\n\n%s\n\n%s\n",
 		renderBanner(),
@@ -554,8 +598,24 @@ func (m Model) viewConfirm() string {
 	)
 }
 
+func (m Model) viewPassword() string {
+	var b strings.Builder
+	b.WriteString(renderBanner())
+	b.WriteString("\n\n")
+	b.WriteString(fmt.Sprintf("Package: %s\n\n", selectedStyle.Render(m.selected.Name)))
+	b.WriteString(subtitleStyle.Render("Sudo password required to uninstall:"))
+	b.WriteString("\n\n")
+	b.WriteString(m.passwordInput.View())
+	b.WriteString("\n\n")
+	if m.err != nil {
+		b.WriteString(errorStyle.Render("✗ "+m.err.Error()) + "\n\n")
+	}
+	b.WriteString(dimStyle.Render("enter: confirm • esc: cancel"))
+	return b.String()
+}
+
 func (m Model) viewSudoAuth() string {
-	return fmt.Sprintf("%s\n\n%s Requesting administrator privileges...\n",
+	return fmt.Sprintf("%s\n\n%s Verifying password...\n",
 		renderBanner(),
 		m.spinner.View(),
 	)
@@ -791,16 +851,15 @@ func doScan(term string) tea.Cmd {
 	}
 }
 
-func doSudoAuth() tea.Cmd {
-	return tea.ExecProcess(
-		exec.Command("sudo", "-v", "--prompt=Password (sudo): "),
-		func(err error) tea.Msg {
-			if err != nil {
-				return sudoAuthDoneMsg{err: fmt.Errorf("authentication failed: %w", err)}
-			}
-			return sudoAuthDoneMsg{err: nil}
-		},
-	)
+func doSudoPassword(password string) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("sudo", "-S", "-v")
+		cmd.Stdin = strings.NewReader(password + "\n")
+		if err := cmd.Run(); err != nil {
+			return sudoAuthDoneMsg{err: err}
+		}
+		return sudoAuthDoneMsg{err: nil}
+	}
 }
 
 func doUninstall(pkg PackageResult, mode string) tea.Cmd {
