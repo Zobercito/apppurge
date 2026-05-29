@@ -8,22 +8,22 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const helpText = `🗑  AppPurge - Desinstalador interactivo de programas
+const helpText = `🗑  AppPurge - Interactive program uninstaller
 
-Uso:
-  appurge              Inicia el modo interactivo (te pide el nombre)
-  appurge <nombre>     Busca directamente el programa indicado
-  appurge -h, --help   Muestra esta ayuda
+Usage:
+  appurge              Start interactive mode (prompts for package name)
+  appurge <name>       Search directly for the given program
+  appurge -h, --help   Show this help
 
-Fuentes soportadas:
-  • APT (paquetes del sistema)
+Supported sources:
+  • APT (system packages)
   • Flatpak
   • Snap
-  • AppImage (archivos .AppImage en tu home)
+  • AppImage (.AppImage files in your home)
 
-Modos de desinstalación:
-  • Normal:   Elimina el programa, conserva tus configuraciones
-  • Completa: Elimina el programa y sus datos (purga conservadora)
+Uninstall modes:
+  • Normal:   Remove the program, keep your config files
+  • Complete: Remove the program and its data (conservative purge)
 `
 
 func main() {

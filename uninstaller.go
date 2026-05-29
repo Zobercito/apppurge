@@ -30,10 +30,10 @@ func isValidPkgName(name string) bool {
 // Uninstall executes the appropriate uninstall commands based on source and mode.
 func Uninstall(pkg PackageResult, mode string) error {
 	if !isValidPkgName(pkg.Name) {
-		return fmt.Errorf("nombre de paquete inválido: %s", pkg.Name)
+		return fmt.Errorf("invalid package name: %s", pkg.Name)
 	}
 	if isProtected(pkg) {
-		return fmt.Errorf("paquete protegido: %s", pkg.Name)
+		return fmt.Errorf("protected package: %s", pkg.Name)
 	}
 
 	start := time.Now()
@@ -49,7 +49,7 @@ func Uninstall(pkg PackageResult, mode string) error {
 	case SourceAppImage:
 		err = uninstallAppImage(pkg, mode)
 	default:
-		err = fmt.Errorf("fuente desconocida: %s", pkg.Source)
+		err = fmt.Errorf("unknown source: %s", pkg.Source)
 	}
 
 	entry := HistoryEntry{
@@ -64,7 +64,7 @@ func Uninstall(pkg PackageResult, mode string) error {
 		entry.Error = err.Error()
 	}
 	if err := AddEntry(entry); err != nil {
-		fmt.Fprintf(os.Stderr, "advertencia: no se pudo guardar historial: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: could not save history: %v\n", err)
 	}
 
 	return err
@@ -85,7 +85,7 @@ func uninstallAPT(pkg PackageResult, mode string) error {
 	}
 	if mode == modeComplete {
 		if err := removeUserData(pkg.Name); err != nil {
-			fmt.Fprintf(os.Stderr, "advertencia: %v\n", err)
+			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 		}
 	}
 	return nil
@@ -97,7 +97,7 @@ func uninstallFlatpak(pkg PackageResult, mode string) error {
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("no se pudo obtener el directorio home: %w", err)
+		return fmt.Errorf("could not get home directory: %w", err)
 	}
 
 	target := pkg.ID
@@ -125,7 +125,7 @@ func uninstallSnap(pkg PackageResult, mode string) error {
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("no se pudo obtener el directorio home: %w", err)
+		return fmt.Errorf("could not get home directory: %w", err)
 	}
 
 	if err := runPrivilegedCtx(ctx, "snap", "remove", pkg.Name); err != nil {
@@ -139,10 +139,10 @@ func uninstallSnap(pkg PackageResult, mode string) error {
 
 func validatePath(path string) error {
 	if path == "" {
-		return fmt.Errorf("ruta vacía")
+		return fmt.Errorf("empty path")
 	}
 	if strings.Contains(path, "..") {
-		return fmt.Errorf("ruta contiene ..")
+		return fmt.Errorf("path contains ..")
 	}
 	cleaned := filepath.Clean(path)
 	home, err := os.UserHomeDir()
@@ -160,19 +160,19 @@ func validatePath(path string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("ruta no está en directorios permitidos")
+	return fmt.Errorf("path not in allowed directories")
 }
 
 func uninstallAppImage(pkg PackageResult, mode string) error {
 	if err := validatePath(pkg.Path); err != nil {
-		return fmt.Errorf("ruta inválida: %w", err)
+		return fmt.Errorf("invalid path: %w", err)
 	}
 	if err := os.Remove(pkg.Path); err != nil {
-		return fmt.Errorf("no se pudo eliminar %s: %w", pkg.Path, err)
+		return fmt.Errorf("could not remove %s: %w", pkg.Path, err)
 	}
 	if mode == modeComplete {
 		if err := removeUserData(pkg.Name); err != nil {
-			fmt.Fprintf(os.Stderr, "advertencia: %v\n", err)
+			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 		}
 	}
 	return nil
@@ -182,12 +182,12 @@ func uninstallAppImage(pkg PackageResult, mode string) error {
 // Only removes directories that exist and are non-empty.
 func removeUserData(name string) error {
 	if !isValidPkgName(name) {
-		return fmt.Errorf("nombre de paquete inválido para borrar datos: %s", name)
+		return fmt.Errorf("invalid package name for removing data: %s", name)
 	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("no se pudo obtener el directorio home: %w", err)
+		return fmt.Errorf("could not get home directory: %w", err)
 	}
 
 	names := []string{strings.ToLower(name), name}
@@ -198,13 +198,13 @@ func removeUserData(name string) error {
 		configPath := filepath.Join(home, ".config", n)
 		if info, err := os.Stat(configPath); err == nil && info.IsDir() {
 			if err := os.RemoveAll(configPath); err != nil {
-				return fmt.Errorf("no se pudo eliminar directorio %s: %w", configPath, err)
+				return fmt.Errorf("could not remove directory %s: %w", configPath, err)
 			}
 		}
 		localPath := filepath.Join(home, ".local", "share", n)
 		if info, err := os.Stat(localPath); err == nil && info.IsDir() {
 			if err := os.RemoveAll(localPath); err != nil {
-				return fmt.Errorf("no se pudo eliminar directorio %s: %w", localPath, err)
+				return fmt.Errorf("could not remove directory %s: %w", localPath, err)
 			}
 		}
 	}
@@ -214,7 +214,7 @@ func removeUserData(name string) error {
 // runPrivilegedCtx runs a command with sudo if not already root.
 func runPrivilegedCtx(ctx context.Context, args ...string) error {
 	if os.Geteuid() != 0 {
-		args = append([]string{"sudo", "--prompt=Contraseña de sudo: "}, args...)
+		args = append([]string{"sudo", "--prompt=Password (sudo): "}, args...)
 	}
 	return runCmdCtx(ctx, args...)
 }
@@ -222,13 +222,13 @@ func runPrivilegedCtx(ctx context.Context, args ...string) error {
 // runCmdCtx executes a command with context timeout and returns any error.
 func runCmdCtx(ctx context.Context, args ...string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("no se proporcionaron argumentos")
+		return fmt.Errorf("no arguments provided")
 	}
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Stdin = os.Stdin
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
-		return fmt.Errorf("el comando excedió el tiempo límite (%v)", uninstallTimeout)
+		return fmt.Errorf("command timed out (%v)", uninstallTimeout)
 	}
 	if err != nil {
 		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))

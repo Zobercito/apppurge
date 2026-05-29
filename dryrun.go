@@ -20,10 +20,10 @@ type DryRunResult struct {
 // DryRun simulates the uninstall and returns what would happen.
 func DryRun(pkg PackageResult, mode string) (DryRunResult, error) {
 	if !isValidPkgName(pkg.Name) {
-		return DryRunResult{}, fmt.Errorf("nombre de paquete inválido: %s", pkg.Name)
+		return DryRunResult{}, fmt.Errorf("invalid package name: %s", pkg.Name)
 	}
 	if isProtected(pkg) {
-		return DryRunResult{}, fmt.Errorf("paquete protegido: %s", pkg.Name)
+		return DryRunResult{}, fmt.Errorf("protected package: %s", pkg.Name)
 	}
 
 	result := DryRunResult{}
@@ -38,7 +38,7 @@ func DryRun(pkg PackageResult, mode string) (DryRunResult, error) {
 	case SourceAppImage:
 		result = dryRunAppImage(pkg, mode)
 	default:
-		return result, fmt.Errorf("fuente desconocida: %s", pkg.Source)
+		return result, fmt.Errorf("unknown source: %s", pkg.Source)
 	}
 
 	// Estimate space

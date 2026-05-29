@@ -48,31 +48,33 @@ type keyMap struct {
 	Filter2 key.Binding
 	Filter3 key.Binding
 	Filter4 key.Binding
+	Filter5 key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Enter, k.Esc, k.Help}
+	return []key.Binding{k.Help}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Enter, k.Esc},
-		{k.Help, k.Filter1, k.Filter2, k.Filter3, k.Filter4},
+		{k.Help, k.Filter1, k.Filter2, k.Filter3, k.Filter4, k.Filter5},
 	}
 }
 
 var keys = keyMap{
-	Up:      key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "subir")),
-	Down:    key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "bajar")),
-	Enter:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "seleccionar")),
-	Esc:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "atrás/salir")),
-	Confirm: key.NewBinding(key.WithKeys("y", "s"), key.WithHelp("y/s", "confirmar")),
-	Cancel:  key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "cancelar")),
-	Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "ayuda")),
-	Filter1: key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "APT")),
-	Filter2: key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "Flatpak")),
-	Filter3: key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "Snap")),
-	Filter4: key.NewBinding(key.WithKeys("4"), key.WithHelp("4", "AppImage")),
+	Up:      key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
+	Down:    key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
+	Enter:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
+	Esc:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back/quit")),
+	Confirm: key.NewBinding(key.WithKeys("y", "s"), key.WithHelp("y/s", "confirm")),
+	Cancel:  key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "cancel")),
+	Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("help", "?")),
+	Filter1: key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "All")),
+	Filter2: key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "APT")),
+	Filter3: key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "Flatpak")),
+	Filter4: key.NewBinding(key.WithKeys("4"), key.WithHelp("4", "Snap")),
+	Filter5: key.NewBinding(key.WithKeys("5"), key.WithHelp("5", "AppImage")),
 }
 
 // Messages
@@ -112,7 +114,7 @@ type Model struct {
 // InitModel creates a new model, optionally with a pre-filled search term.
 func InitModel(term string) Model {
 	ti := textinput.New()
-	ti.Placeholder = "Ej: firefox, vlc, gimp..."
+	ti.Placeholder = "e.g.: firefox, vlc, gimp..."
 	ti.Width = 60
 	ti.Focus()
 
@@ -182,7 +184,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case sudoAuthDoneMsg:
 		if msg.err != nil {
-			m.err = fmt.Errorf("error de autenticación: %w", msg.err)
+			m.err = fmt.Errorf("authentication error: %w", msg.err)
 			m.state = stateDone
 			return m, nil
 		}
@@ -295,20 +297,20 @@ func (m Model) updateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.searchTerm = ""
 			m.textInput.SetValue("")
 		case "1":
-			m.filter = SourceAPT
-			m.applyFilter()
-		case "2":
-			m.filter = SourceFlatpak
-			m.applyFilter()
-		case "3":
-			m.filter = SourceSnap
-			m.applyFilter()
-		case "4":
-			m.filter = SourceAppImage
-			m.applyFilter()
-		case "0":
 			m.filter = ""
 			m.results = m.allResults
+		case "2":
+			m.filter = SourceAPT
+			m.applyFilter()
+		case "3":
+			m.filter = SourceFlatpak
+			m.applyFilter()
+		case "4":
+			m.filter = SourceSnap
+			m.applyFilter()
+		case "5":
+			m.filter = SourceAppImage
+			m.applyFilter()
 		}
 	}
 	return m, nil
@@ -403,60 +405,75 @@ func (m Model) updateDryRun(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateDone(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if _, ok := msg.(tea.KeyMsg); ok {
-		return m, tea.Quit
+	if key, ok := msg.(tea.KeyMsg); ok {
+		if key.String() == "esc" {
+			m.state = stateInput
+			m.textInput.Focus()
+			m.textInput.SetValue("")
+			m.err = nil
+			m.results = nil
+			m.allResults = nil
+			return m, nil
+		}
+		m.state = stateInput
+		m.textInput.Focus()
+		m.textInput.SetValue("")
+		m.err = nil
+		m.results = nil
+		m.allResults = nil
+		return m, nil
 	}
 	return m, nil
 }
 
 func (m Model) View() string {
 	if m.quitting {
-		return dimStyle.Render("Operación cancelada.") + "\n"
+		return dimStyle.Render("Operation cancelled.") + "\n"
 	}
 
+	separator := "\n" + dimStyle.Render("────────────────────────────────────────────────")
+
 	if m.state == stateHelp {
-		return m.viewHelp()
+		return m.viewHelp() + separator
 	}
 
 	switch m.state {
 	case stateInput:
-		return m.viewInput()
+		return m.viewInput() + separator
 	case stateScanning:
-		return m.viewScanning()
+		return m.viewScanning() + separator
 	case stateResults:
-		return m.viewResults()
+		return m.viewResults() + separator
 	case stateModeSelect:
-		return m.viewModeSelect()
+		return m.viewModeSelect() + separator
 	case stateConfirm:
-		return m.viewConfirm()
+		return m.viewConfirm() + separator
 	case stateSudoAuth:
-		return m.viewSudoAuth()
+		return m.viewSudoAuth() + separator
 	case stateExecuting:
-		return m.viewExecuting()
+		return m.viewExecuting() + separator
 	case stateDone:
-		return m.viewDone()
+		return m.viewDone() + separator
 	case statePackageInfo:
-		return m.viewPackageInfo()
+		return m.viewPackageInfo() + separator
 	case stateDryRun:
-		return m.viewDryRun()
+		return m.viewDryRun() + separator
 	}
 	return ""
 }
 
 func (m Model) viewInput() string {
 	var b strings.Builder
-	b.WriteString(renderBannerSuffix("Desinstalador interactivo"))
+	b.WriteString(renderBannerSuffix("Interactive Uninstaller"))
 	b.WriteString("\n\n")
 	b.WriteString(m.textInput.View())
 	b.WriteString("\n\n")
-	b.WriteString(dimStyle.Render("enter: buscar • esc: salir • ?: ayuda"))
-	b.WriteString("\n")
-	b.WriteString(dimStyle.Render("────────────────────────────────────────────────"))
+	b.WriteString(dimStyle.Render("esc: quit • help: ?"))
 	return b.String()
 }
 
 func (m Model) viewScanning() string {
-	return fmt.Sprintf("%s\n\n%s Buscando \"%s\" en el sistema...\n",
+	return fmt.Sprintf("%s\n\n%s Searching system for \"%s\"...\n",
 		renderBanner(),
 		m.spinner.View(),
 		m.searchTerm,
@@ -467,10 +484,12 @@ func (m Model) viewResults() string {
 	var b strings.Builder
 	b.WriteString(renderBanner())
 	b.WriteString("\n")
-	b.WriteString(subtitleStyle.Render(fmt.Sprintf("%d resultados para \"%s\"", len(m.results), m.searchTerm)))
-	if m.filter != "" {
-		b.WriteString(" ")
-		b.WriteString(sourceTag(m.filter).Render("[Filtro: " + m.filter + "]"))
+	b.WriteString(subtitleStyle.Render(fmt.Sprintf("%d results for \"%s\"", len(m.results), m.searchTerm)))
+	b.WriteString(" ")
+	if m.filter == "" {
+		b.WriteString(sourceTag("ALL").Render("[Filter: ALL]"))
+	} else {
+		b.WriteString(sourceTag(m.filter).Render("[Filter: " + m.filter + "]"))
 	}
 	b.WriteString("\n\n")
 
@@ -489,7 +508,7 @@ func (m Model) viewResults() string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString(dimStyle.Render("↑/↓: navegar • enter: seleccionar • esc: volver • 1-4: filtrar • ?: ayuda"))
+	b.WriteString(dimStyle.Render("esc: back • 1-5: filter • help: ?"))
 	return b.String()
 }
 
@@ -497,14 +516,14 @@ func (m Model) viewModeSelect() string {
 	var b strings.Builder
 	b.WriteString(renderBanner())
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("Programa seleccionado: %s\n\n", selectedStyle.Render(m.selected.Name)))
-	b.WriteString(subtitleStyle.Render("¿Cómo deseas proceder?"))
+	b.WriteString(fmt.Sprintf("Selected package: %s\n\n", selectedStyle.Render(m.selected.Name)))
+	b.WriteString(subtitleStyle.Render("How would you like to proceed?"))
 	b.WriteString("\n\n")
 
 	options := []string{
-		"Desinstalación Normal (conserva tus configuraciones)",
-		"Desinstalación Completa (borra TODO, sin dejar rastro)",
-		"Volver a resultados",
+		"Normal Uninstall (keep your settings)",
+		"Complete Uninstall (delete everything, no trace left)",
+		"Back to results",
 	}
 	for i, opt := range options {
 		cursor := "  "
@@ -517,33 +536,33 @@ func (m Model) viewModeSelect() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(dimStyle.Render("↑/↓: navegar • enter: seleccionar • esc: volver"))
+	b.WriteString(dimStyle.Render("↑/↓: navigate • enter: select • esc: back"))
 	return b.String()
 }
 
 func (m Model) viewConfirm() string {
 	modeText := "normal"
 	if m.mode == modeComplete {
-		modeText = "completa (purga)"
+		modeText = "complete (purge)"
 	}
-	alert := fmt.Sprintf("¿Estás seguro de eliminar \"%s\" [%s] en modo %s?",
+	alert := fmt.Sprintf("Are you sure you want to uninstall \"%s\" [%s] in %s mode?",
 		m.selected.Name, m.selected.Source, modeText)
 	return fmt.Sprintf("%s\n\n%s\n\n%s\n",
 		renderBanner(),
 		warningStyle.Render(alert),
-		dimStyle.Render("y/s: confirmar • n/esc: cancelar"),
+		dimStyle.Render("y/s: confirm • n/esc: cancel"),
 	)
 }
 
 func (m Model) viewSudoAuth() string {
-	return fmt.Sprintf("%s\n\n%s Solicitando permisos de administrador...\n",
+	return fmt.Sprintf("%s\n\n%s Requesting administrator privileges...\n",
 		renderBanner(),
 		m.spinner.View(),
 	)
 }
 
 func (m Model) viewExecuting() string {
-	return fmt.Sprintf("%s\n\n%s Desinstalando %s...\n",
+	return fmt.Sprintf("%s\n\n%s Uninstalling %s...\n",
 		renderBanner(),
 		m.spinner.View(),
 		m.selected.Name,
@@ -552,95 +571,108 @@ func (m Model) viewExecuting() string {
 
 func (m Model) viewDone() string {
 	if len(m.results) == 0 && m.err == nil {
-		return fmt.Sprintf("%s\n\n%s\n",
+		return fmt.Sprintf("%s\n\n%s\n\n%s\n",
 			renderBanner(),
-			dimStyle.Render("No se encontró nada que coincida con \""+m.searchTerm+"\"."),
+			dimStyle.Render("Nothing found matching \""+m.searchTerm+"\"."),
+			dimStyle.Render("esc: back"),
 		)
 	}
 	if m.err != nil {
 		return fmt.Sprintf("%s\n\n%s\n%s\n\n%s\n",
 			renderBanner(),
-			errorStyle.Render("✗ Error durante la desinstalación:"),
+			errorStyle.Render("✗ Error during uninstall:"),
 			errorStyle.Render(m.err.Error()),
-			dimStyle.Render("Presiona cualquier tecla para salir."),
+			dimStyle.Render("Press any key to continue."),
 		)
 	}
 	return fmt.Sprintf("%s\n\n%s\n\n%s\n",
 		renderBanner(),
-		successStyle.Render("✓ ¡Listo! \""+m.selected.Name+"\" ha sido eliminado con éxito."),
-		dimStyle.Render("Presiona cualquier tecla para salir."),
+		successStyle.Render("✓ Done! \""+m.selected.Name+"\" has been successfully removed."),
+		dimStyle.Render("Press any key to continue."),
 	)
 }
 
 func (m Model) viewHelp() string {
 	var b strings.Builder
-	b.WriteString(renderBannerSuffix("Ayuda"))
+	b.WriteString(renderBannerSuffix("Help"))
 	b.WriteString("\n\n")
-	b.WriteString(subtitleStyle.Render("Navegación:"))
+	b.WriteString(subtitleStyle.Render("Navigation:"))
 	b.WriteString("\n")
-	b.WriteString("  ↑/k  Subir en la lista\n")
-	b.WriteString("  ↓/j  Bajar en la lista\n")
-	b.WriteString("  enter  Seleccionar/Confirmar\n")
-	b.WriteString("  esc  Volver atrás / Salir\n")
+	b.WriteString("  ↑/k  Move up in list\n")
+	b.WriteString("  ↓/j  Move down in list\n")
+	b.WriteString("  enter  Select/Confirm\n")
+	b.WriteString("  esc  Go back / Quit\n")
 	b.WriteString("\n")
-	b.WriteString(subtitleStyle.Render("Acciones (en resultados):"))
+	b.WriteString(subtitleStyle.Render("Actions (in results):"))
 	b.WriteString("\n")
-	b.WriteString("  i  Ver información del paquete\n")
-	b.WriteString("  d  Dry-run (simular desinstalación)\n")
+	b.WriteString("  i  View package info\n")
+	b.WriteString("  d  Dry-run (simulate uninstall)\n")
 	b.WriteString("\n")
-	b.WriteString(subtitleStyle.Render("Filtros (en resultados):"))
+	b.WriteString(subtitleStyle.Render("Filters (in results):"))
 	b.WriteString("\n")
-	b.WriteString("  1  Mostrar solo APT\n")
-	b.WriteString("  2  Mostrar solo Flatpak\n")
-	b.WriteString("  3  Mostrar solo Snap\n")
-	b.WriteString("  4  Mostrar solo AppImage\n")
-	b.WriteString("  0  Sin filtro\n")
+	b.WriteString("  1  Show all (no filter)\n")
+	b.WriteString("  2  Show only APT\n")
+	b.WriteString("  3  Show only Flatpak\n")
+	b.WriteString("  4  Show only Snap\n")
+	b.WriteString("  5  Show only AppImage\n")
 	b.WriteString("\n")
-	b.WriteString(subtitleStyle.Render("Modos de desinstalación:"))
+	b.WriteString(subtitleStyle.Render("Uninstall modes:"))
 	b.WriteString("\n")
-	b.WriteString("  Normal:   Elimina el programa, conserva configuraciones\n")
-	b.WriteString("  Completa: Elimina el programa y TODOS sus datos\n")
+	b.WriteString("  Normal:   Remove the program, keep config files\n")
+	b.WriteString("  Complete: Remove the program and ALL its data\n")
 	b.WriteString("\n")
-	b.WriteString(dimStyle.Render("Presiona esc o ? para volver"))
+	b.WriteString(dimStyle.Render("Press esc or ? to go back"))
 	return b.String()
 }
 
 func (m Model) viewPackageInfo() string {
 	if m.pkgInfo == nil {
-		return fmt.Sprintf("%s\n\n%s Cargando información...\n",
+		return fmt.Sprintf("%s\n\n%s Loading info...\n",
 			renderBanner(),
 			m.spinner.View(),
 		)
 	}
 	info := m.pkgInfo
 	var b strings.Builder
-	b.WriteString(renderBannerSuffix("Información del paquete"))
+	b.WriteString(renderBannerSuffix("Package Info"))
 	b.WriteString("\n\n")
-	b.WriteString("  Nombre:      " + selectedStyle.Render(info.Name) + "\n")
+	b.WriteString("  Name:        " + selectedStyle.Render(info.Name) + "\n")
 	if info.Version != "" {
-		b.WriteString("  Versión:     " + info.Version + "\n")
+		b.WriteString("  Version:     " + info.Version + "\n")
 	}
 	if info.InstalledSize != "" {
-		b.WriteString("  Tamaño:      " + info.InstalledSize + "\n")
+		b.WriteString("  Size:        " + info.InstalledSize + "\n")
 	}
 	if info.Description != "" {
-		b.WriteString("  Descripción: " + info.Description + "\n")
+		maxWidth := m.width - 16 // "  Description: " = 15 + 1 space
+		if maxWidth < 30 {
+			maxWidth = 60
+		}
+		wrapped := wordWrap(info.Description, maxWidth)
+		lines := strings.Split(wrapped, "\n")
+		for i, line := range lines {
+			if i == 0 {
+				b.WriteString("  Description: " + line + "\n")
+			} else {
+				b.WriteString("               " + line + "\n")
+			}
+		}
 	}
 	if len(info.Dependents) > 0 {
 		b.WriteString("\n")
-		b.WriteString(warningStyle.Render("  ⚠ Dependencias inversas ("+fmt.Sprintf("%d", len(info.Dependents))+"):") + "\n")
+		b.WriteString(highlightStyle.Render("  ⚠ Reverse dependencies ("+fmt.Sprintf("%d", len(info.Dependents))+"):") + "\n")
 		for _, dep := range info.Dependents {
 			b.WriteString("    - " + dep + "\n")
 		}
 	}
 	b.WriteString("\n")
-	b.WriteString(dimStyle.Render("Presiona esc, enter o i para volver"))
+	b.WriteString(dimStyle.Render("Press esc, enter or i to go back"))
 	return b.String()
 }
 
 func (m Model) viewDryRun() string {
 	if m.dryResult == nil {
-		return fmt.Sprintf("%s\n\n%s Simulando desinstalación...\n",
+		return fmt.Sprintf("%s\n\n%s Simulating uninstall...\n",
 			renderBanner(),
 			m.spinner.View(),
 		)
@@ -648,31 +680,31 @@ func (m Model) viewDryRun() string {
 	result := m.dryResult
 
 	var b strings.Builder
-	b.WriteString(renderBannerSuffix("Dry Run (Simulación)"))
+	b.WriteString(renderBannerSuffix("Dry Run (Simulation)"))
 	b.WriteString("\n\n")
-	b.WriteString("  Paquete: " + selectedStyle.Render(m.selected.Name) + " [" + m.selected.Source + "]\n")
+	b.WriteString("  Package: " + selectedStyle.Render(m.selected.Name) + " [" + m.selected.Source + "]\n")
 	modeText := "Normal"
 	if m.mode == modeComplete {
-		modeText = "Completa (purga)"
+		modeText = "Complete (purge)"
 	}
-	b.WriteString("  Modo:    " + modeText + "\n")
-	b.WriteString("  Espacio estimado a liberar: " + successStyle.Render(FormatBytes(result.EstimateBytes)) + "\n")
+	b.WriteString("  Mode:    " + modeText + "\n")
+	b.WriteString("  Estimated space to free: " + successStyle.Render(FormatBytes(result.EstimateBytes)) + "\n")
 	b.WriteString("\n")
-	b.WriteString(subtitleStyle.Render("Comandos que se ejecutarían:"))
+	b.WriteString(subtitleStyle.Render("Commands that would be executed:"))
 	b.WriteString("\n")
 	for _, cmd := range result.Commands {
 		b.WriteString("  $ " + cmd + "\n")
 	}
 	if len(result.DirsToRemove) > 0 {
 		b.WriteString("\n")
-		b.WriteString(subtitleStyle.Render("Directorios que se eliminarían:"))
+		b.WriteString(subtitleStyle.Render("Directories that would be removed:"))
 		b.WriteString("\n")
 		for _, dir := range result.DirsToRemove {
 			b.WriteString("  - " + dir + "\n")
 		}
 	}
 	b.WriteString("\n")
-	b.WriteString(dimStyle.Render("Presiona esc, enter o d para volver"))
+	b.WriteString(dimStyle.Render("Press esc, enter or d to go back"))
 	return b.String()
 }
 
@@ -686,6 +718,8 @@ func sourceTag(source string) lipgloss.Style {
 		return sourceSnap
 	case SourceAppImage:
 		return sourceAppImage
+	case "ALL":
+		return sourceAll
 	}
 	return dimStyle
 }
@@ -718,6 +752,37 @@ func formatResult(r PackageResult, active bool) string {
 	return tag + " " + name
 }
 
+// wordWrap breaks a string into multiple lines at word boundaries, each
+// line at most width characters wide.
+func wordWrap(s string, width int) string {
+	if width <= 0 || len(s) <= width {
+		return s
+	}
+	var wrapped strings.Builder
+	words := strings.Fields(s)
+	lineLen := 0
+	for _, word := range words {
+		space := 1
+		if lineLen == 0 {
+			space = 0
+		}
+		if lineLen+space+len(word) > width {
+			if lineLen > 0 {
+				wrapped.WriteByte('\n')
+			}
+			wrapped.WriteString(word)
+			lineLen = len(word)
+		} else {
+			if lineLen > 0 {
+				wrapped.WriteByte(' ')
+			}
+			wrapped.WriteString(word)
+			lineLen += space + len(word)
+		}
+	}
+	return wrapped.String()
+}
+
 // Commands
 func doScan(term string) tea.Cmd {
 	return func() tea.Msg {
@@ -728,10 +793,10 @@ func doScan(term string) tea.Cmd {
 
 func doSudoAuth() tea.Cmd {
 	return tea.ExecProcess(
-		exec.Command("sudo", "-v", "--prompt=Contraseña de sudo: "),
+		exec.Command("sudo", "-v", "--prompt=Password (sudo): "),
 		func(err error) tea.Msg {
 			if err != nil {
-				return sudoAuthDoneMsg{err: fmt.Errorf("autenticación fallida: %w", err)}
+				return sudoAuthDoneMsg{err: fmt.Errorf("authentication failed: %w", err)}
 			}
 			return sudoAuthDoneMsg{err: nil}
 		},
