@@ -1,0 +1,10 @@
+build/
+appurge
+apppurge
+coverage.out
+.codegraph/
+.agents/
+.kiro/
+skills-lock.json
+IDEA.txt
+AGENTS.md
