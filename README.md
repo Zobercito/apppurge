@@ -30,7 +30,25 @@ Uninstalling system packages requires `sudo`. AppPurge asks for the password in 
 
 ## Install
 
-Build and install from source:
+### Download a release binary
+
+Download the binary for your architecture from the
+[latest release](https://github.com/Zobercito/apppurge/releases/latest), verify
+its checksum, and install it:
+
+```bash
+VERSION=v1.1.0
+curl -LO "https://github.com/Zobercito/apppurge/releases/download/${VERSION}/apppurge-${VERSION}-linux-amd64"
+curl -LO "https://github.com/Zobercito/apppurge/releases/download/${VERSION}/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS
+chmod +x "apppurge-${VERSION}-linux-amd64"
+sudo install -m 0755 "apppurge-${VERSION}-linux-amd64" /usr/local/bin/apppurge
+```
+
+Replace `amd64` with `arm64` on ARM systems. The `SHA256SUMS` file covers both
+binaries. Check the installed version with `apppurge --version`.
+
+### Build and install from source
 
 ```bash
 git clone https://github.com/Zobercito/apppurge.git
