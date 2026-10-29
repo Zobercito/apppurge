@@ -47,12 +47,18 @@ func appImageDesktopEntries() map[string][]string {
 	return entriesByAppImage
 }
 
-func desktopEntryAppImage(path string) (string, bool) {
+func desktopEntryAppImage(path string) (appImagePath string, ok bool) {
+	// The path comes from enumerated per-user application directories.
+	//nolint:gosec // G304: scanning these desktop entries is intentional.
 	file, err := os.Open(path)
 	if err != nil {
 		return "", false
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			appImagePath, ok = "", false
+		}
+	}()
 
 	inDesktopEntry := false
 	typeApplication := false
@@ -216,11 +222,17 @@ func scanWebApps(ctx context.Context, term string) ([]PackageResult, error) {
 }
 
 func desktopEntryWebApp(path string) (name, execLine string, ok bool) {
+	// The path comes from enumerated per-user application directories.
+	//nolint:gosec // G304: scanning these desktop entries is intentional.
 	file, err := os.Open(path)
 	if err != nil {
 		return "", "", false
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			name, execLine, ok = "", "", false
+		}
+	}()
 
 	inDesktopEntry := false
 	typeApplication := false

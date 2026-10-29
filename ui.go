@@ -359,7 +359,7 @@ func (m *Model) refreshSuggestions() {
 	for _, pkg := range m.catalog {
 		fields := []string{pkg.Name, pkg.ID, pkg.Installation, pkg.Path, pkg.Source}
 		text := strings.ToLower(strings.Join(fields, " "))
-		rank := 99
+		var rank int
 		switch {
 		case strings.EqualFold(pkg.Name, term) || strings.EqualFold(pkg.ID, term):
 			rank = 0
@@ -1022,7 +1022,7 @@ func (m Model) viewConfirm() string {
 		} else if len(m.confirmRemovals) == 0 {
 			b.WriteString(dimStyle.Render(m.selected.Source+" no indicó paquetes adicionales para quitar.") + "\n")
 		} else {
-			b.WriteString(fmt.Sprintf("También se quitarán %d paquete(s):\n", len(m.confirmRemovals)))
+			b.WriteString("También se quitarán " + fmt.Sprint(len(m.confirmRemovals)) + " paquete(s):\n")
 			for i, name := range m.confirmRemovals {
 				if i >= 12 {
 					b.WriteString(dimStyle.Render(fmt.Sprintf("    … y %d más\n", len(m.confirmRemovals)-12)))
@@ -1085,7 +1085,7 @@ func (m Model) viewPassword() string {
 	var b strings.Builder
 	b.WriteString(renderBanner())
 	b.WriteString("\n\n")
-	b.WriteString(fmt.Sprintf("Programa: %s\n\n", selectedStyle.Render(safeDisplayText(m.selected.Name))))
+	b.WriteString("Programa: " + selectedStyle.Render(safeDisplayText(m.selected.Name)) + "\n\n")
 	b.WriteString(subtitleStyle.Render("Se necesita tu contraseña de sudo para desinstalarlo:"))
 	b.WriteString("\n\n")
 	b.WriteString(m.passwordInput.View())
@@ -1216,8 +1216,8 @@ func (m Model) viewHistory() string {
 				mode = "Completa"
 			}
 			name := truncateDisplayText(safeDisplayText(entry.Name), 64)
-			b.WriteString(fmt.Sprintf("%s %s  %s\n", marker, entry.Timestamp.Format("2006-01-02 15:04"), selectedStyle.Render(name)))
-			b.WriteString(fmt.Sprintf("    %s · %s · %s\n", safeDisplayText(entry.Source), mode, entry.Duration.Round(100*time.Millisecond)))
+			b.WriteString(marker + " " + entry.Timestamp.Format("2006-01-02 15:04") + "  " + selectedStyle.Render(name) + "\n")
+			b.WriteString("    " + safeDisplayText(entry.Source) + " · " + mode + " · " + entry.Duration.Round(100*time.Millisecond).String() + "\n")
 			if !entry.Success && entry.Error != "" {
 				b.WriteString("    " + errorStyle.Render(truncateDisplayText(safeDisplayText(entry.Error), 96)) + "\n")
 			}
@@ -1308,7 +1308,7 @@ func (m Model) viewDryRun() string {
 		if result.RemovalPreviewErr != "" {
 			b.WriteString(warningTextStyle.Render("No se pudo obtener la lista de paquetes adicionales: "+safeDisplayText(result.RemovalPreviewErr)) + "\n")
 		} else {
-			b.WriteString(fmt.Sprintf("Paquetes que se quitarían además: %d\n", len(result.PackagesToRemove)))
+			b.WriteString("Paquetes que se quitarían además: " + fmt.Sprint(len(result.PackagesToRemove)) + "\n")
 			for i, name := range result.PackagesToRemove {
 				if i == 12 {
 					b.WriteString(dimStyle.Render(fmt.Sprintf("  … y %d más\n", len(result.PackagesToRemove)-12)))
@@ -1455,13 +1455,6 @@ func wordWrap(s string, width int) string {
 }
 
 // Commands
-func doScan(term string) tea.Cmd {
-	return func() tea.Msg {
-		result := ScanAll(term)
-		return scanDoneMsg{result: result}
-	}
-}
-
 func doScanInstalled() tea.Cmd {
 	return func() tea.Msg { return catalogDoneMsg{result: ScanInstalled()} }
 }

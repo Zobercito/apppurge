@@ -44,6 +44,8 @@ func ensureHistoryDir() error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
+	// 0700 is appropriate for a private directory; the history file itself is 0600.
+	//nolint:gosec // G302: directory permissions intentionally include execute bits.
 	return os.Chmod(dir, 0700)
 }
 
@@ -54,6 +56,8 @@ func LoadHistory() (History, error) {
 		return History{}, err
 	}
 
+	// historyPath always points to this user's appurge configuration directory.
+	//nolint:gosec // G304: this is the intended application data file.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -89,17 +93,24 @@ func SaveHistory(h History) error {
 		return fmt.Errorf("create history temp file: %w", err)
 	}
 	tmpPath := tmp.Name()
+	//nolint:errcheck // Best-effort cleanup; preserve the primary save result.
 	defer func() { _ = os.Remove(tmpPath) }()
 	if err := tmp.Chmod(0600); err != nil {
-		_ = tmp.Close()
+		if closeErr := tmp.Close(); closeErr != nil {
+			return fmt.Errorf("set history permissions: %w (close temp file: %v)", err, closeErr)
+		}
 		return fmt.Errorf("set history permissions: %w", err)
 	}
 	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
+		if closeErr := tmp.Close(); closeErr != nil {
+			return fmt.Errorf("write history: %w (close temp file: %v)", err, closeErr)
+		}
 		return fmt.Errorf("write history: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
+		if closeErr := tmp.Close(); closeErr != nil {
+			return fmt.Errorf("sync history: %w (close temp file: %v)", err, closeErr)
+		}
 		return fmt.Errorf("sync history: %w", err)
 	}
 	if err := tmp.Close(); err != nil {

@@ -136,9 +136,7 @@ func getPacmanInfo(pkg PackageResult) PackageInfo {
 		case "Required By":
 			info.DependentsKnown = true
 			if val != "" && !strings.EqualFold(val, "None") {
-				for _, dep := range strings.Fields(val) {
-					info.Dependents = append(info.Dependents, dep)
-				}
+				info.Dependents = append(info.Dependents, strings.Fields(val)...)
 			}
 		}
 	}

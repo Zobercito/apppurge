@@ -91,15 +91,21 @@ func runCLIDryRun(w io.Writer, term, source, mode string) error {
 	if len(packages) == 0 {
 		for _, scanErr := range scan.Errors {
 			if source == "" || scanErr.Source == source {
-				fmt.Fprintf(w, "Aviso: %s\n", scanErr)
+				if _, err := fmt.Fprintf(w, "Aviso: %s\n", scanErr); err != nil {
+					return fmt.Errorf("escribir aviso de búsqueda: %w", err)
+				}
 			}
 		}
 		return fmt.Errorf("no se encontró un programa instalado que coincida con %q", term)
 	}
 	if len(packages) > 1 {
-		fmt.Fprintf(w, "La búsqueda coincide con %d programas; concreta el término o elige una fuente:\n", len(packages))
+		if _, err := fmt.Fprintf(w, "La búsqueda coincide con %d programas; concreta el término o elige una fuente:\n", len(packages)); err != nil {
+			return fmt.Errorf("escribir resultados de búsqueda: %w", err)
+		}
 		for _, pkg := range packages {
-			fmt.Fprintf(w, "  - %s [%s]\n", safeDisplayText(pkg.Name), pkg.Source)
+			if _, err := fmt.Fprintf(w, "  - %s [%s]\n", safeDisplayText(pkg.Name), pkg.Source); err != nil {
+				return fmt.Errorf("escribir resultados de búsqueda: %w", err)
+			}
 		}
 		return fmt.Errorf("la simulación requiere exactamente un programa coincidente")
 	}
@@ -109,26 +115,46 @@ func runCLIDryRun(w io.Writer, term, source, mode string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "Simulación para %s [%s]\n", safeDisplayText(pkg.Name), pkg.Source)
-	if pkg.Source == SourceFlatpak {
-		fmt.Fprintf(w, "Instalación: %s · ID: %s\n", safeDisplayText(pkg.Installation), safeDisplayText(pkg.ID))
+	write := func(format string, args ...any) error {
+		_, err := fmt.Fprintf(w, format, args...)
+		return err
 	}
-	fmt.Fprintf(w, "Tamaño estimado del paquete (sin dependencias ni datos de usuario): %s\n", FormatBytes(plan.EstimateBytes))
+	if err := write("Simulación para %s [%s]\n", safeDisplayText(pkg.Name), pkg.Source); err != nil {
+		return fmt.Errorf("escribir simulación: %w", err)
+	}
+	if pkg.Source == SourceFlatpak {
+		if err := write("Instalación: %s · ID: %s\n", safeDisplayText(pkg.Installation), safeDisplayText(pkg.ID)); err != nil {
+			return fmt.Errorf("escribir simulación: %w", err)
+		}
+	}
+	if err := write("Tamaño estimado del paquete (sin dependencias ni datos de usuario): %s\n", FormatBytes(plan.EstimateBytes)); err != nil {
+		return fmt.Errorf("escribir simulación: %w", err)
+	}
 	for _, command := range plan.Commands {
-		fmt.Fprintf(w, "Se ejecutaría: %s\n", safeDisplayText(command))
+		if err := write("Se ejecutaría: %s\n", safeDisplayText(command)); err != nil {
+			return fmt.Errorf("escribir simulación: %w", err)
+		}
 	}
 	if plan.RemovalPreviewErr != "" {
-		fmt.Fprintf(w, "Vista previa de paquetes adicionales no disponible: %s\n", safeDisplayText(plan.RemovalPreviewErr))
+		if err := write("Vista previa de paquetes adicionales no disponible: %s\n", safeDisplayText(plan.RemovalPreviewErr)); err != nil {
+			return fmt.Errorf("escribir simulación: %w", err)
+		}
 	} else {
 		for _, name := range plan.PackagesToRemove {
-			fmt.Fprintf(w, "También se quitaría el paquete: %s\n", safeDisplayText(name))
+			if err := write("También se quitaría el paquete: %s\n", safeDisplayText(name)); err != nil {
+				return fmt.Errorf("escribir simulación: %w", err)
+			}
 		}
 	}
 	for _, dir := range plan.DirsToRemove {
-		fmt.Fprintf(w, "Se eliminaría la carpeta de datos: %s\n", safeDisplayText(dir))
+		if err := write("Se eliminaría la carpeta de datos: %s\n", safeDisplayText(dir)); err != nil {
+			return fmt.Errorf("escribir simulación: %w", err)
+		}
 	}
 	for _, file := range plan.FilesToRemove {
-		fmt.Fprintf(w, "Se eliminaría el acceso del menú: %s\n", safeDisplayText(file))
+		if err := write("Se eliminaría el acceso del menú: %s\n", safeDisplayText(file)); err != nil {
+			return fmt.Errorf("escribir simulación: %w", err)
+		}
 	}
 	return nil
 }

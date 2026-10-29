@@ -25,4 +25,5 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@v4
         with:
-          version: latest
+          # v2.13.0 added Go 1.27 support; pin a known compatible release.
+          version: v2.15.0
