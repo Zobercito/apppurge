@@ -16,6 +16,26 @@ func TestGetPackageInfoAPT(t *testing.T) {
 	}
 }
 
+func TestGetPackageInfoPacman(t *testing.T) {
+	if _, err := exec.LookPath("pacman"); err != nil {
+		t.Skip("pacman not available")
+	}
+	pkg := PackageResult{Name: "bash", Source: SourcePacman}
+	info := GetPackageInfo(pkg)
+	if info.Name != "bash" {
+		t.Errorf("Expected name 'bash', got %q", info.Name)
+	}
+	if info.Version == "" {
+		t.Error("Expected version for bash")
+	}
+	if info.InstalledSize == "" {
+		t.Error("Expected installed size for bash")
+	}
+	if info.Description == "" {
+		t.Error("Expected description for bash")
+	}
+}
+
 func TestGetPackageInfoFlatpak(t *testing.T) {
 	if _, err := exec.LookPath("flatpak"); err != nil {
 		t.Skip("flatpak not available")

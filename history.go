@@ -40,7 +40,11 @@ func ensureHistoryDir() error {
 	if err != nil {
 		return err
 	}
-	return os.MkdirAll(filepath.Dir(path), 0755)
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	return os.Chmod(dir, 0700)
 }
 
 // LoadHistory reads the history file and returns the History struct.
@@ -79,7 +83,32 @@ func SaveHistory(h History) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0600)
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".history-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create history temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err := tmp.Chmod(0600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("set history permissions: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write history: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync history: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close history: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replace history: %w", err)
+	}
+	return nil
 }
 
 // AddEntry appends a new entry to the history and saves it.

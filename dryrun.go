@@ -12,15 +12,35 @@ import (
 
 // DryRunResult contains the commands that would be executed and estimated space.
 type DryRunResult struct {
-	Commands      []string
-	DirsToRemove  []string
-	EstimateBytes int64
+	Commands          []string
+	PackagesToRemove  []string
+	RemovalPreviewErr string
+	DirsToRemove      []string
+	FilesToRemove     []string
+	EstimateBytes     int64
 }
 
 // DryRun simulates the uninstall and returns what would happen.
 func DryRun(pkg PackageResult, mode string) (DryRunResult, error) {
-	if !isValidPkgName(pkg.Name) {
-		return DryRunResult{}, fmt.Errorf("invalid package name: %s", pkg.Name)
+	switch pkg.Source {
+	case SourceAPT, SourcePacman, SourceSnap:
+		if !isValidPkgName(pkg.Name) {
+			return DryRunResult{}, fmt.Errorf("invalid package name: %s", pkg.Name)
+		}
+	case SourceFlatpak:
+		if !isValidFlatpakID(pkg.ID) || strings.ContainsAny(pkg.Installation, "\x00\r\n") {
+			return DryRunResult{}, fmt.Errorf("invalid Flatpak reference")
+		}
+	case SourceAppImage:
+		if err := validatePath(pkg.Path); err != nil {
+			return DryRunResult{}, fmt.Errorf("invalid path: %w", err)
+		}
+	case SourceWebApp:
+		if err := validateWebAppDesktopEntry(pkg.Path, pkg.Name, pkg.ID); err != nil {
+			return DryRunResult{}, fmt.Errorf("invalid web app launcher: %w", err)
+		}
+	default:
+		return DryRunResult{}, fmt.Errorf("unknown source: %s", pkg.Source)
 	}
 	if isProtected(pkg) {
 		return DryRunResult{}, fmt.Errorf("protected package: %s", pkg.Name)
@@ -31,14 +51,26 @@ func DryRun(pkg PackageResult, mode string) (DryRunResult, error) {
 	switch pkg.Source {
 	case SourceAPT:
 		result = dryRunAPT(pkg, mode)
+	case SourcePacman:
+		result = dryRunPacman(pkg, mode)
 	case SourceFlatpak:
 		result = dryRunFlatpak(pkg, mode)
 	case SourceSnap:
 		result = dryRunSnap(pkg, mode)
 	case SourceAppImage:
 		result = dryRunAppImage(pkg, mode)
+	case SourceWebApp:
+		result = dryRunWebApp(pkg)
 	default:
 		return result, fmt.Errorf("unknown source: %s", pkg.Source)
+	}
+	if mode == modeComplete {
+		switch pkg.Source {
+		case SourceAPT:
+			result.PackagesToRemove, result.RemovalPreviewErr = previewAPTRemovals(pkg.Name)
+		case SourcePacman:
+			result.PackagesToRemove, result.RemovalPreviewErr = previewPacmanRemovals(pkg.Name)
+		}
 	}
 
 	// Estimate space
@@ -55,27 +87,89 @@ func dryRunAPT(pkg PackageResult, mode string) DryRunResult {
 		result.Commands = append(result.Commands, "sudo apt remove -y "+pkg.Name)
 	}
 	if mode == modeComplete {
-		if home, err := os.UserHomeDir(); err == nil {
-			result.DirsToRemove = append(result.DirsToRemove,
-				filepath.Join(home, ".config", strings.ToLower(pkg.Name)),
-				filepath.Join(home, ".local", "share", strings.ToLower(pkg.Name)),
-			)
-		}
+		result.DirsToRemove = append(result.DirsToRemove, candidateUserDataDirs(pkg.Name)...)
 	}
 	return result
 }
 
-func dryRunFlatpak(pkg PackageResult, mode string) DryRunResult {
+func dryRunPacman(pkg PackageResult, mode string) DryRunResult {
 	result := DryRunResult{}
-	target := pkg.ID
-	if target == "" {
-		target = pkg.Name
+	if mode == modeComplete {
+		result.Commands = append(result.Commands, "sudo pacman -Rns --noconfirm "+pkg.Name)
+	} else {
+		result.Commands = append(result.Commands, "sudo pacman -R --noconfirm "+pkg.Name)
 	}
 	if mode == modeComplete {
-		result.Commands = append(result.Commands, "flatpak uninstall --delete-data -y "+target)
-	} else {
-		result.Commands = append(result.Commands, "flatpak uninstall -y "+target)
+		result.DirsToRemove = append(result.DirsToRemove, candidateUserDataDirs(pkg.Name)...)
 	}
+	return result
+}
+
+// previewPacmanRemovals asks pacman to resolve a recursive removal without changing the system.
+func previewPacmanRemovals(name string) ([]string, string) {
+	if !isValidPkgName(name) {
+		return nil, "invalid package name"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
+	defer cancel()
+	// Pacman rejects combining --print with -n (--nosave). The -n flag only
+	// controls preservation of package configuration files; it does not change
+	// which packages -Rs selects, so this previews the same removal set safely.
+	cmd := exec.CommandContext(ctx, "pacman", "-Rs", "--print", "--print-format", "%n", name)
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err.Error()
+	}
+	seen := make(map[string]bool)
+	var names []string
+	for _, line := range strings.Split(string(out), "\n") {
+		name := strings.TrimSpace(line)
+		if name != "" && !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	return names, ""
+}
+
+// previewAPTRemovals simulates purge/autoremove and extracts its removal set.
+func previewAPTRemovals(name string) ([]string, string) {
+	if !isValidPkgName(name) {
+		return nil, "invalid package name"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "apt-get", "-s", "purge", "--autoremove", name)
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err.Error()
+	}
+	seen := make(map[string]bool)
+	var names []string
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || (fields[0] != "Remv" && fields[0] != "Purg") {
+			continue
+		}
+		if !seen[fields[1]] {
+			seen[fields[1]] = true
+			names = append(names, fields[1])
+		}
+	}
+	return names, ""
+}
+
+func dryRunFlatpak(pkg PackageResult, mode string) DryRunResult {
+	result := DryRunResult{}
+	args := append([]string{"flatpak"}, flatpakScopeArgs(pkg)...)
+	args = append(args, "uninstall")
+	if mode == modeComplete {
+		args = append(args, "--delete-data")
+	}
+	args = append(args, "-y", pkg.ID)
+	result.Commands = append(result.Commands, strings.Join(args, " "))
 	if mode == modeComplete && pkg.ID != "" {
 		if home, err := os.UserHomeDir(); err == nil {
 			result.DirsToRemove = append(result.DirsToRemove,
@@ -88,14 +182,16 @@ func dryRunFlatpak(pkg PackageResult, mode string) DryRunResult {
 
 func dryRunSnap(pkg PackageResult, mode string) DryRunResult {
 	result := DryRunResult{}
-	result.Commands = append(result.Commands, "sudo snap remove "+pkg.Name)
+	command := "sudo snap remove " + pkg.Name
 	if mode == modeComplete {
+		command += " --purge"
 		if home, err := os.UserHomeDir(); err == nil {
 			result.DirsToRemove = append(result.DirsToRemove,
 				filepath.Join(home, "snap", pkg.Name),
 			)
 		}
 	}
+	result.Commands = append(result.Commands, command)
 	return result
 }
 
@@ -103,14 +199,14 @@ func dryRunAppImage(pkg PackageResult, mode string) DryRunResult {
 	result := DryRunResult{}
 	result.Commands = append(result.Commands, "rm "+pkg.Path)
 	if mode == modeComplete {
-		if home, err := os.UserHomeDir(); err == nil {
-			result.DirsToRemove = append(result.DirsToRemove,
-				filepath.Join(home, ".config", strings.ToLower(pkg.Name)),
-				filepath.Join(home, ".local", "share", strings.ToLower(pkg.Name)),
-			)
-		}
+		result.DirsToRemove = append(result.DirsToRemove, candidateUserDataDirs(pkg.Name)...)
+		result.FilesToRemove = append(result.FilesToRemove, candidateCompleteDesktopFiles(pkg)...)
 	}
 	return result
+}
+
+func dryRunWebApp(pkg PackageResult) DryRunResult {
+	return DryRunResult{FilesToRemove: []string{pkg.Path}}
 }
 
 func estimatePackageSpace(pkg PackageResult) int64 {
@@ -125,8 +221,23 @@ func estimatePackageSpace(pkg PackageResult) int64 {
 				return size * 1024
 			}
 		}
+	case SourcePacman:
+		cmd := exec.CommandContext(ctx, "pacman", "-Qi", pkg.Name)
+		cmd.Env = append(os.Environ(), "LC_ALL=C")
+		out, err := cmd.Output()
+		if err == nil {
+			for _, line := range strings.Split(string(out), "\n") {
+				if strings.HasPrefix(line, "Installed Size") {
+					parts := strings.SplitN(line, ":", 2)
+					if len(parts) == 2 {
+						return parsePacmanSize(strings.TrimSpace(parts[1]))
+					}
+				}
+			}
+		}
 	case SourceFlatpak:
-		_, err := exec.CommandContext(ctx, "flatpak", "info", "--show-ref", pkg.ID).Output()
+		args := append(flatpakScopeArgs(pkg), "info", "--show-ref", pkg.ID)
+		_, err := exec.CommandContext(ctx, "flatpak", args...).Output()
 		if err == nil {
 			home, homeErr := os.UserHomeDir()
 			flatpakDirs := []string{"/var/lib/flatpak/app/" + pkg.ID}
@@ -172,6 +283,30 @@ func estimatePackageSpace(pkg PackageResult) int64 {
 		if err == nil {
 			return info.Size()
 		}
+	}
+	return 0
+}
+
+// parsePacmanSize parses sizes like "9.59 MiB" or "512.00 KiB" into bytes.
+func parsePacmanSize(s string) int64 {
+	fields := strings.Fields(s)
+	if len(fields) < 2 {
+		return 0
+	}
+	num, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return 0
+	}
+	unit := strings.ToLower(fields[1])
+	switch unit {
+	case "b":
+		return int64(num)
+	case "kib", "kb":
+		return int64(num * 1024)
+	case "mib", "mb":
+		return int64(num * 1024 * 1024)
+	case "gib", "gb":
+		return int64(num * 1024 * 1024 * 1024)
 	}
 	return 0
 }

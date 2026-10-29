@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestFormatBytes(t *testing.T) {
 	tests := []struct {
@@ -55,9 +59,8 @@ func TestDryRunAPTComplete(t *testing.T) {
 	if len(result.Commands) == 0 {
 		t.Error("Expected at least one command")
 	}
-	if len(result.DirsToRemove) == 0 {
-		t.Error("Expected dirs to remove in complete mode")
-	}
+	// DirsToRemove only lists directories that already exist under ~/.config
+	// or ~/.local/share — for a fake package name that is usually empty.
 }
 
 func TestDryRunFlatpak(t *testing.T) {
@@ -83,12 +86,70 @@ func TestDryRunSnap(t *testing.T) {
 }
 
 func TestDryRunAppImage(t *testing.T) {
-	pkg := PackageResult{Name: "test-app", Source: SourceAppImage, Path: "/tmp/test.AppImage"}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	appDir := filepath.Join(home, "Downloads")
+	if err := os.MkdirAll(appDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pkg := PackageResult{Name: "test-app", Source: SourceAppImage, Path: filepath.Join(appDir, "test.AppImage")}
 	result, err := DryRun(pkg, modeNormal)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 	if len(result.Commands) == 0 {
 		t.Error("Expected at least one command")
+	}
+}
+
+func TestDryRunPacman(t *testing.T) {
+	pkg := PackageResult{Name: "test-pkg", Source: SourcePacman}
+	result, err := DryRun(pkg, modeNormal)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(result.Commands) == 0 {
+		t.Error("Expected at least one command")
+	}
+	if result.Commands[0] != "sudo pacman -R --noconfirm test-pkg" {
+		t.Errorf("Unexpected command: %s", result.Commands[0])
+	}
+}
+
+func TestDryRunPacmanComplete(t *testing.T) {
+	pkg := PackageResult{Name: "test-pkg", Source: SourcePacman}
+	result, err := DryRun(pkg, modeComplete)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(result.Commands) == 0 {
+		t.Error("Expected at least one command")
+	}
+	if result.Commands[0] != "sudo pacman -Rns --noconfirm test-pkg" {
+		t.Errorf("Unexpected command: %s", result.Commands[0])
+	}
+	if len(result.DirsToRemove) != 0 {
+		t.Errorf("Expected no existing user-data dirs for fake package, got %v", result.DirsToRemove)
+	}
+}
+
+func TestParsePacmanSize(t *testing.T) {
+	mib := float64(1024 * 1024)
+	tests := []struct {
+		in   string
+		want int64
+	}{
+		{"9.59 MiB", int64(9.59 * mib)},
+		{"512.00 KiB", 512 * 1024},
+		{"1.00 GiB", 1024 * 1024 * 1024},
+		{"100 B", 100},
+		{"", 0},
+		{"bogus", 0},
+	}
+	for _, tt := range tests {
+		got := parsePacmanSize(tt.in)
+		if got != tt.want {
+			t.Errorf("parsePacmanSize(%q) = %d; want %d", tt.in, got, tt.want)
+		}
 	}
 }
