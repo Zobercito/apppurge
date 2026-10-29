@@ -22,6 +22,7 @@ const (
 	stateResults
 	stateModeSelect
 	stateConfirm
+	stateFinalConfirm
 	statePassword
 	stateSudoAuth
 	stateExecuting
@@ -94,6 +95,9 @@ type Model struct {
 	confirmDataDirs     []string
 	confirmDesktopFiles []string
 	confirmDepsReady    bool
+	finalConfirmInput   textinput.Model
+	finalConfirmErr     string
+	finalConfirmPage    int
 	history             History
 	historyErr          error
 	historyCursor       int
@@ -121,18 +125,23 @@ func InitModel(term string) Model {
 	pi.Width = 60
 	pi.Focus()
 
+	finalConfirmInput := textinput.New()
+	finalConfirmInput.Placeholder = "Escribe el nombre exacto del programa"
+	finalConfirmInput.Width = 60
+
 	state := stateInput
 	if term != "" {
 		state = stateScanning
 	}
 
 	return Model{
-		state:          state,
-		textInput:      ti,
-		spinner:        sp,
-		searchTerm:     term,
-		passwordInput:  pi,
-		catalogLoading: true,
+		state:             state,
+		textInput:         ti,
+		spinner:           sp,
+		searchTerm:        term,
+		passwordInput:     pi,
+		finalConfirmInput: finalConfirmInput,
+		catalogLoading:    true,
 	}
 }
 
@@ -149,6 +158,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.textInput.Width = 60
+		if m.state == stateFinalConfirm {
+			lastPage := (len(m.finalConfirmItems()) - 1) / m.finalConfirmPageSize()
+			if lastPage < 0 {
+				lastPage = 0
+			}
+			if m.finalConfirmPage > lastPage {
+				m.finalConfirmPage = lastPage
+			}
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -255,6 +273,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateModeSelect(msg)
 	case stateConfirm:
 		return m.updateConfirm(msg)
+	case stateFinalConfirm:
+		return m.updateFinalConfirm(msg)
 	case statePassword:
 		return m.updatePassword(msg)
 	case stateHelp:
@@ -665,15 +685,15 @@ func (m Model) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.mode == modeComplete && (m.selected.Source == SourceAPT || m.selected.Source == SourcePacman) && m.confirmRemovalErr != "" {
 				return m, nil
 			}
-			if needsPrivilege(m.selected) {
-				m.state = statePassword
-				m.err = nil
-				m.passwordInput.SetValue("")
-				m.passwordInput.Focus()
+			if m.requiresFinalConfirmation() {
+				m.finalConfirmInput.SetValue("")
+				m.finalConfirmInput.Focus()
+				m.finalConfirmErr = ""
+				m.finalConfirmPage = 0
+				m.state = stateFinalConfirm
 				return m, tea.ClearScreen
 			}
-			m.state = stateExecuting
-			return m, tea.Batch(tea.ClearScreen, m.spinner.Tick, doUninstall(m.selected, m.mode, m.confirmDataDirs, m.confirmDesktopFiles))
+			return m.beginUninstall()
 		case "r":
 			m.confirmDeps = nil
 			m.confirmDepsKnown = false
@@ -697,6 +717,105 @@ func (m Model) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m Model) updateFinalConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.String() {
+		case "pgup":
+			if m.finalConfirmPage > 0 {
+				m.finalConfirmPage--
+			}
+			return m, nil
+		case "pgdown":
+			lastPage := (len(m.finalConfirmItems()) - 1) / m.finalConfirmPageSize()
+			if m.finalConfirmPage < lastPage {
+				m.finalConfirmPage++
+			}
+			return m, nil
+		case "esc":
+			m.state = stateConfirm
+			m.finalConfirmInput.SetValue("")
+			m.finalConfirmErr = ""
+			m.finalConfirmPage = 0
+			return m, tea.ClearScreen
+		case "enter":
+			if m.finalConfirmInput.Value() != m.selected.Name {
+				m.finalConfirmErr = "El nombre no coincide exactamente; no se ejecutará la desinstalación."
+				return m, nil
+			}
+			m.finalConfirmErr = ""
+			return m.beginUninstall()
+		}
+	}
+	previousValue := m.finalConfirmInput.Value()
+	var cmd tea.Cmd
+	m.finalConfirmInput, cmd = m.finalConfirmInput.Update(msg)
+	if m.finalConfirmInput.Value() != previousValue {
+		m.finalConfirmErr = ""
+	}
+	return m, cmd
+}
+
+func (m Model) requiresFinalConfirmation() bool {
+	return len(m.confirmDeps) > 0 || len(m.additionalRemovalPackages()) > 0
+}
+
+func (m Model) finalConfirmItems() []string {
+	items := make([]string, 0, len(m.confirmDeps)+len(m.confirmRemovals)+len(m.confirmDataDirs)+len(m.confirmDesktopFiles))
+	for _, name := range m.confirmDeps {
+		items = append(items, "Dependiente: "+safeDisplayText(name))
+	}
+	for _, name := range m.additionalRemovalPackages() {
+		items = append(items, "Se quitará: "+safeDisplayText(name))
+	}
+	for _, dir := range m.confirmDataDirs {
+		items = append(items, "Se eliminarán datos: "+safeDisplayText(dir))
+	}
+	for _, file := range m.confirmDesktopFiles {
+		items = append(items, "Se quitará acceso del menú: "+safeDisplayText(file))
+	}
+	return items
+}
+
+func (m Model) finalConfirmPageSize() int {
+	if m.height <= 0 {
+		return 6
+	}
+	pageSize := m.height - 18
+	if pageSize < 1 {
+		return 1
+	}
+	if pageSize > 8 {
+		return 8
+	}
+	return pageSize
+}
+
+func (m Model) additionalRemovalPackages() []string {
+	var additional []string
+	seen := make(map[string]bool, len(m.confirmRemovals))
+	for _, name := range m.confirmRemovals {
+		baseName, _, _ := strings.Cut(name, ":") // APT may include an architecture suffix.
+		if baseName == m.selected.Name || seen[name] {
+			continue
+		}
+		seen[name] = true
+		additional = append(additional, name)
+	}
+	return additional
+}
+
+func (m Model) beginUninstall() (tea.Model, tea.Cmd) {
+	if needsPrivilege(m.selected) {
+		m.state = statePassword
+		m.err = nil
+		m.passwordInput.SetValue("")
+		m.passwordInput.Focus()
+		return m, tea.ClearScreen
+	}
+	m.state = stateExecuting
+	return m, tea.Batch(tea.ClearScreen, m.spinner.Tick, doUninstall(m.selected, m.mode, m.confirmDataDirs, m.confirmDesktopFiles))
 }
 
 func (m Model) updatePassword(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -837,6 +956,8 @@ func (m Model) View() string {
 		return m.viewModeSelect() + separator
 	case stateConfirm:
 		return m.viewConfirm() + separator
+	case stateFinalConfirm:
+		return m.viewFinalConfirm() + separator
 	case statePassword:
 		return m.viewPassword() + separator
 	case stateSudoAuth:
@@ -1019,13 +1140,14 @@ func (m Model) viewConfirm() string {
 		if m.confirmRemovalErr != "" {
 			b.WriteString(errorStyle.Render("No se pudo previsualizar lo que se quitará: "+safeDisplayText(m.confirmRemovalErr)) + "\n")
 			b.WriteString(errorStyle.Render("La desinstalación completa queda bloqueada hasta obtener la vista previa.") + "\n")
-		} else if len(m.confirmRemovals) == 0 {
+		} else if len(m.additionalRemovalPackages()) == 0 {
 			b.WriteString(dimStyle.Render(m.selected.Source+" no indicó paquetes adicionales para quitar.") + "\n")
 		} else {
-			b.WriteString("También se quitarán " + fmt.Sprint(len(m.confirmRemovals)) + " paquete(s):\n")
-			for i, name := range m.confirmRemovals {
+			removals := m.additionalRemovalPackages()
+			b.WriteString("También se quitarán " + fmt.Sprint(len(removals)) + " paquete(s):\n")
+			for i, name := range removals {
 				if i >= 12 {
-					b.WriteString(dimStyle.Render(fmt.Sprintf("    … y %d más\n", len(m.confirmRemovals)-12)))
+					b.WriteString(dimStyle.Render(fmt.Sprintf("    … y %d más\n", len(removals)-12)))
 					break
 				}
 				b.WriteString("    - " + safeDisplayText(name) + "\n")
@@ -1078,6 +1200,55 @@ func (m Model) viewConfirm() string {
 	} else {
 		b.WriteString(keyHint("s / y", "confirmar") + "  " + keyHint("n / Esc", "cancelar"))
 	}
+	return b.String()
+}
+
+func (m Model) viewFinalConfirm() string {
+	var b strings.Builder
+	b.WriteString(renderBanner())
+	b.WriteString("\n\n")
+	b.WriteString(errorStyle.Render("⚠ Confirmación adicional requerida"))
+	b.WriteString("\n\n")
+	b.WriteString("Para evitar una eliminación accidental, escribe exactamente el nombre del programa:\n")
+	b.WriteString("Programa: " + selectedStyle.Render(safeDisplayText(m.selected.Name)) + "\n\n")
+	b.WriteString("Fuente: " + safeDisplayText(m.selected.Source) + " · Modo: ")
+	if m.mode == modeComplete {
+		b.WriteString("Completa\n\n")
+	} else {
+		b.WriteString("Normal\n\n")
+	}
+	items := m.finalConfirmItems()
+	pageSize := m.finalConfirmPageSize()
+	pages := (len(items) + pageSize - 1) / pageSize
+	page := m.finalConfirmPage
+	if pages == 0 {
+		page = 0
+	} else if page >= pages {
+		page = pages - 1
+	}
+	start := page * pageSize
+	end := start + pageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	b.WriteString("Impacto adicional: " + fmt.Sprint(len(items)) + " elemento(s)")
+	if pages > 1 {
+		b.WriteString(" · página " + fmt.Sprint(page+1) + " de " + fmt.Sprint(pages))
+	}
+	b.WriteString(":\n")
+	for _, item := range items[start:end] {
+		b.WriteString("    - " + item + "\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(m.finalConfirmInput.View())
+	b.WriteString("\n\n")
+	if m.finalConfirmErr != "" {
+		b.WriteString(errorStyle.Render(safeDisplayText(m.finalConfirmErr)) + "\n\n")
+	}
+	if pages > 1 {
+		b.WriteString(keyHint("PgUp/PgDn", "revisar impacto") + "  ")
+	}
+	b.WriteString(keyHint("Enter", "confirmar escribiendo el nombre exacto") + "  " + keyHint("Esc", "volver sin desinstalar"))
 	return b.String()
 }
 

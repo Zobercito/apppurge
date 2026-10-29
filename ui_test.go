@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -19,7 +20,7 @@ func TestViewConfirmShowsRemovalAndDataPreviews(t *testing.T) {
 	}
 	view := m.viewConfirm()
 	for _, want := range []string{
-		"También se quitarán 2 paquete(s)",
+		"También se quitarán 1 paquete(s)",
 		"shared-dep",
 		"Se eliminarán estas carpetas de datos:",
 		"/home/test/.config/app",
@@ -291,5 +292,155 @@ func TestVisibleWindowKeepsCursorInsideRenderedPage(t *testing.T) {
 				t.Fatalf("visibleWindow() = (%d, %d); want (%d, %d)", start, end, tt.wantStart, tt.wantEnd)
 			}
 		})
+	}
+}
+
+func TestConfirmRequiresExactPackageNameForAdditionalImpact(t *testing.T) {
+	input := textinput.New()
+	m := Model{
+		state:             stateConfirm,
+		confirmDepsReady:  true,
+		confirmDepsKnown:  true,
+		confirmDeps:       []string{"desktop-shell"},
+		selected:          PackageResult{Name: "chromium", Source: SourceAPT},
+		mode:              modeNormal,
+		passwordInput:     textinput.New(),
+		finalConfirmInput: input,
+	}
+
+	updated, _ := m.updateConfirm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	got := updated.(Model)
+	if got.state != stateFinalConfirm {
+		t.Fatalf("first confirmation skipped the exact-name step: state=%d", got.state)
+	}
+	for _, want := range []string{"desktop-shell", "Confirmación adicional requerida", "chromium"} {
+		if view := got.viewFinalConfirm(); !strings.Contains(view, want) {
+			t.Errorf("final confirmation does not contain %q: %s", want, view)
+		}
+	}
+
+	updated, cmd := got.updateFinalConfirm(tea.KeyMsg{Type: tea.KeyEnter})
+	got = updated.(Model)
+	if got.state != stateFinalConfirm || cmd != nil || got.finalConfirmErr == "" {
+		t.Fatalf("empty name was accepted: state=%d cmd=%v error=%q", got.state, cmd, got.finalConfirmErr)
+	}
+
+	updated, _ = got.updateFinalConfirm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	got = updated.(Model)
+	if got.state != stateFinalConfirm || got.finalConfirmInput.Value() != "n" {
+		t.Fatalf("letter n was treated as a cancel command: state=%d value=%q", got.state, got.finalConfirmInput.Value())
+	}
+
+	got.finalConfirmInput.SetValue("Chromium")
+	updated, cmd = got.updateFinalConfirm(tea.KeyMsg{Type: tea.KeyEnter})
+	got = updated.(Model)
+	if got.state != stateFinalConfirm || cmd != nil || got.finalConfirmErr == "" {
+		t.Fatalf("case-mismatched name was accepted: state=%d cmd=%v error=%q", got.state, cmd, got.finalConfirmErr)
+	}
+
+	got.finalConfirmInput.SetValue("chromium")
+	updated, cmd = got.updateFinalConfirm(tea.KeyMsg{Type: tea.KeyEnter})
+	got = updated.(Model)
+	if got.state != statePassword || cmd == nil || got.finalConfirmErr != "" {
+		t.Fatalf("exact name did not advance to sudo prompt: state=%d cmd=%v error=%q", got.state, cmd, got.finalConfirmErr)
+	}
+}
+
+func TestFinalConfirmationCanBeCancelled(t *testing.T) {
+	m := Model{
+		state:             stateFinalConfirm,
+		selected:          PackageResult{Name: "shared-lib", Source: SourceAPT},
+		finalConfirmInput: textinput.New(),
+		finalConfirmErr:   "previous mismatch",
+	}
+	m.finalConfirmInput.SetValue("shared-lib")
+	updated, _ := m.updateFinalConfirm(tea.KeyMsg{Type: tea.KeyEsc})
+	got := updated.(Model)
+	if got.state != stateConfirm || got.finalConfirmErr != "" || got.finalConfirmInput.Value() != "" {
+		t.Fatalf("Esc did not safely cancel the final confirmation: state=%d error=%q value=%q", got.state, got.finalConfirmErr, got.finalConfirmInput.Value())
+	}
+}
+
+func TestAdditionalRemovalPackagesExcludeTargetAndDuplicates(t *testing.T) {
+	m := Model{
+		selected: PackageResult{Name: "browser", Source: SourceAPT},
+		confirmRemovals: []string{
+			"browser:amd64",
+			"shared-lib",
+			"shared-lib",
+			"desktop-shell",
+		},
+	}
+	got := m.additionalRemovalPackages()
+	want := []string{"shared-lib", "desktop-shell"}
+	if len(got) != len(want) {
+		t.Fatalf("additionalRemovalPackages() = %v; want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("additionalRemovalPackages() = %v; want %v", got, want)
+		}
+	}
+}
+
+func TestConfirmRemovalPreviewRequiresExactNameWhenItRemovesOtherPackages(t *testing.T) {
+	m := Model{
+		state:               stateConfirm,
+		confirmDepsReady:    true,
+		confirmDepsKnown:    true,
+		confirmRemovals:     []string{"browser", "shared-lib"},
+		confirmDataDirs:     []string{"/home/test/.config/browser"},
+		confirmDesktopFiles: []string{"/home/test/.local/share/applications/browser.desktop"},
+		selected:            PackageResult{Name: "browser", Source: SourcePacman},
+		mode:                modeComplete,
+		passwordInput:       textinput.New(),
+		finalConfirmInput:   textinput.New(),
+	}
+	view := m.viewConfirm()
+	if !strings.Contains(view, "También se quitarán 1 paquete(s)") || strings.Contains(view, "\n    - browser\n") {
+		t.Fatalf("preview did not distinguish the selected target from additional removals: %s", view)
+	}
+	updated, _ := m.updateConfirm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	got := updated.(Model)
+	finalView := got.viewFinalConfirm()
+	if got.state != stateFinalConfirm || !strings.Contains(finalView, "shared-lib") || !strings.Contains(finalView, "/home/test/.config/browser") || !strings.Contains(finalView, "browser.desktop") {
+		t.Fatalf("additional package removal skipped the exact-name confirmation: state=%d view=%s", got.state, got.viewFinalConfirm())
+	}
+}
+
+func TestFinalConfirmationCanReviewEveryImpactPage(t *testing.T) {
+	deps := make([]string, 14)
+	for i := range deps {
+		deps[i] = fmt.Sprintf("dependent-%02d", i)
+	}
+	m := Model{
+		state:             stateFinalConfirm,
+		height:            24,
+		selected:          PackageResult{Name: "shared-lib", Source: SourcePacman},
+		confirmDeps:       deps,
+		finalConfirmInput: textinput.New(),
+	}
+
+	firstPage := m.viewFinalConfirm()
+	if !strings.Contains(firstPage, "página 1 de 3") || !strings.Contains(firstPage, "dependent-00") || strings.Contains(firstPage, "dependent-06") {
+		t.Fatalf("first impact page has unexpected contents: %s", firstPage)
+	}
+	updated, _ := m.updateFinalConfirm(tea.KeyMsg{Type: tea.KeyPgDown})
+	got := updated.(Model)
+	secondPage := got.viewFinalConfirm()
+	if got.finalConfirmPage != 1 || !strings.Contains(secondPage, "página 2 de 3") || !strings.Contains(secondPage, "dependent-06") {
+		t.Fatalf("PgDn did not show the next impact page: page=%d view=%s", got.finalConfirmPage, secondPage)
+	}
+	updated, _ = got.updateFinalConfirm(tea.KeyMsg{Type: tea.KeyPgDown})
+	got = updated.(Model)
+	updated, _ = got.updateFinalConfirm(tea.KeyMsg{Type: tea.KeyPgDown})
+	got = updated.(Model)
+	lastPage := got.viewFinalConfirm()
+	if got.finalConfirmPage != 2 || !strings.Contains(lastPage, "página 3 de 3") || !strings.Contains(lastPage, "dependent-12") || !strings.Contains(lastPage, "dependent-13") {
+		t.Fatalf("last impact page omitted dependencies: page=%d view=%s", got.finalConfirmPage, lastPage)
+	}
+	updated, _ = got.updateFinalConfirm(tea.KeyMsg{Type: tea.KeyPgDown})
+	if updated.(Model).finalConfirmPage != 2 {
+		t.Fatal("PgDn advanced past the last page")
 	}
 }
