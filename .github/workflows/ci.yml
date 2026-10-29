@@ -23,7 +23,7 @@ jobs:
         run: go test -v -race -coverprofile=coverage.out ./...
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v7
         with:
           # v2.13.0 added Go 1.27 support; pin a known compatible release.
           version: v2.15.0
