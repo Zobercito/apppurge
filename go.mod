@@ -1,6 +1,6 @@
 module github.com/Zobercito/apppurge
 
-go 1.18
+go 1.27
 
 require (
 	github.com/charmbracelet/bubbles v0.18.0

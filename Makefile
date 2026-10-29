@@ -1,9 +1,10 @@
 .PHONY: build test lint fmt install clean
 
-BINARY_NAME=appurge
+BINARY_NAME=apppurge
 BUILD_DIR=build
 
 build:
+	mkdir -p $(BUILD_DIR)
 	go build -o $(BUILD_DIR)/$(BINARY_NAME) .
 
 test:
