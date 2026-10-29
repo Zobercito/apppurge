@@ -1,91 +1,115 @@
-# 🗑 AppPurge
+# AppPurge
 
-**Interactive TUI uninstaller** — search and remove programs from APT, Flatpak, Snap and AppImage through a clean terminal interface.
+AppPurge is an interactive Linux uninstaller. Search installed programs from one terminal interface, review what will be removed, and uninstall through the package manager that owns each program.
 
-Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
-
-## Screenshot
+It is written in Go and uses [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lip Gloss](https://github.com/charmbracelet/lipgloss).
 
 ![AppPurge demo](assets/demo.gif)
 
+## Supported sources
+
+| Source | What AppPurge searches |
+| --- | --- |
+| APT | Installed packages on Debian, Ubuntu, Linux Mint, and related distributions |
+| Pacman | Installed packages on Arch Linux, Manjaro, EndeavourOS, Omarchy, and related distributions |
+| Flatpak | Installed applications in detected user and system installations |
+| Snap | Installed Snap packages |
+| AppImage | `.AppImage` files directly inside `~/Applications`, `~/Downloads`, `~/Descargas`, and `~/.local/share/Applications` |
+| Web App | User menu launchers created with `omarchy-launch-webapp` |
+
+Available package managers are detected automatically. Sources whose command-line tools are not installed are skipped. AppImage scanning checks only the listed directories, not their subdirectories.
+
 ## Requirements
 
-- **Go 1.18+** — [Download](https://go.dev/dl/)
-- **GNU Make** — usually pre-installed on Debian, Arch, Fedora, etc.
+- Linux
+- Go **1.27 or later** to build from source
+- GNU Make to use the provided build commands
+- The command-line tool for each package manager you want to search; AppImages do not require a package manager
 
-APT, Flatpak and Snap are auto-detected if installed. Missing package managers are simply skipped.
+Uninstalling system packages requires `sudo`. AppPurge asks for the password in the TUI when needed. User-scoped Flatpak apps and AppImages do not require system privileges.
 
-## Installation
+## Install
+
+Build and install from source:
 
 ```bash
 git clone https://github.com/Zobercito/apppurge.git
 cd apppurge
-make build          # compiles to build/apppurge
-sudo make install   # copies to /usr/local/bin/
+make build        # creates build/apppurge
+make install      # installs to /usr/local/bin/apppurge (asks sudo for the copy)
 ```
 
-You can also run the binary directly without installing:
-
-```bash
-./build/apppurge
-```
-
-Or install it with Go:
+Or install with Go:
 
 ```bash
 go install github.com/Zobercito/apppurge@latest
 ```
 
-## Usage
+To run a local build without installing it:
 
 ```bash
-apppurge              # interactive mode (prompts for package name)
-apppurge firefox      # search directly for a package
-apppurge -h           # show help
+./build/apppurge
 ```
 
-## Supported package managers
+## Use
 
-| Source | Description |
-|--------|-------------|
-| **APT** | System packages (Debian, Ubuntu, Mint, etc.) |
-| **Flatpak** | Flatpak applications |
-| **Snap** | Snap packages |
-| **AppImage** | AppImage files in `~/Applications`, `~/Downloads`, `~/.local/share/Applications` |
+```bash
+apppurge                # open the search screen
+apppurge firefox        # open results for a search immediately
+apppurge --source pacman firefox  # limit the initial results to Pacman
+apppurge --dry-run firefox        # print a plan if exactly one program matches
+apppurge --dry-run --complete firefox  # preview complete mode without uninstalling
+apppurge --help         # show command-line help
+apppurge --version      # show version information
+```
+
+Search terms must contain at least two characters. AppPurge shows up to 200 results per source.
+`--source` accepts `apt`, `pacman`, `flatpak`, `snap`, `appimage`, or `webapp`. The CLI dry-run exits without uninstalling; if the search is ambiguous, narrow the term or specify a source.
+
+### Keyboard controls
+
+| Key | Action |
+| --- | --- |
+| `↑` / `↓`, `k` / `j` | Move through results or choices |
+| `PgUp` / `PgDn` | Move by a page |
+| `Enter` | Select a result or confirm the highlighted choice |
+| `1`–`7` | Show all sources, or filter to APT, Flatpak, Snap, AppImage, Pacman, or Web Apps |
+| `i` | View package information and reverse dependencies |
+| `d` | Preview the uninstall operation |
+| `h` | View recent uninstall attempts |
+| `?` | Open help for the current flow |
+| `Esc` | Return to the previous screen or leave search |
+
+The uninstall flow lets you choose a mode, review dependency and removal information where supported, and confirm before running the package manager.
 
 ## Uninstall modes
 
-- **Normal** — Removes the program, keeps configuration files
-- **Complete** — Removes the program and all its data (config, cache, local state)
+- **Normal** asks the package manager to remove the selected program and keeps user data that AppPurge does not explicitly target.
+- **Complete** uses the package manager's purge or recursive-removal option where available, then removes the user-data directories listed on the confirmation screen. Pacman may remove unneeded dependencies; the confirmation screen shows its removal preview. For Snap, this mode uses `snap remove --purge`, which prevents a new automatic data snapshot; snapshots already on the system are left alone. For AppImages, it can also remove user `.desktop` entries whose `Exec` field points directly to that file. AppPurge only targets the displayed paths and cannot guarantee removal of every cache or application data file.
+- **Web App** removes only the matching user `.desktop` launcher created by `omarchy-launch-webapp`. It leaves the website and browser profile data untouched.
 
-## Features
+Package-manager behavior differs by source. In particular, system-level package removals can affect other programs that depend on the selected package. Review the confirmation details before proceeding.
 
-- Interactive TUI with keyboard navigation (`↑/↓`, `enter`, `esc`)
-- Real-time parallel search across all package managers
-- Per-source filtering (`1`=APT, `2`=Flatpak, `3`=Snap, `4`=AppImage)
-- Dry-run mode to preview what would be deleted
-- Package info viewer (version, size, description, reverse dependencies)
-- Uninstall history in `~/.config/apppurge/history.json`
-- Package name and path validation to prevent injection
-- Protected system packages list (kernel, systemd, etc.)
-- Color-coded sources: APT=teal, Flatpak=violet, Snap=orange, AppImage=pink
+## Data and history
+
+AppPurge keeps a local history of the last 100 uninstall attempts at:
+
+```text
+${XDG_CONFIG_HOME:-~/.config}/appurge/history.json
+```
+
+The history is a JSON file and can be viewed from the results screen with `h`. It is informational; the TUI does not provide an undo action.
 
 ## Development
 
 ```bash
-make build    # compile
-make test     # run tests
-make lint     # golangci-lint
-make fmt      # go fmt
-make clean    # remove build artifacts
+make build    # compile to build/apppurge
+make test     # run tests with the race detector and coverage
+make lint     # run golangci-lint
+make fmt      # format Go files
+make clean    # remove build/ and coverage.out
 ```
-
-## Notes
-
-- Commands requiring admin privileges (`apt remove`, `snap remove`) auto-elevate with `sudo`.
-- Missing `flatpak` or `snap` are silently skipped.
-- Uninstall history is stored in `~/.config/apppurge/history.json`.
 
 ## License
 
-GNU General Public License v3.0 — see [LICENSE](LICENSE).
+AppPurge is distributed under the [GNU General Public License v3.0](LICENSE).
